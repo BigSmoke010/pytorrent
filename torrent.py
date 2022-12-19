@@ -13,14 +13,11 @@ submitmagnetentry.grid(row=0,column=1)
 
 def getmagnet():
     txtvar.set('amosh')
-    paramtrs = {
-    'url':submitmagnetentry.get(),
-    'save_path' : 'downloads/',
-    'storage_mode' : lt.storage_mode_t(2)
-    }
+    paramtrs = lt.parse_magnet_uri(submitmagnetentry.get())
     handle = s.add_torrent(paramtrs)
     while not handle.has_metadata:
         time.sleep(1)
+        print('got metadata')
     while handle.status().state != lt.torrent_status.seeding:
         se = handle.status()
         txtvar.set('Progress ' + str(se.progress * 100) + '\n' +'Seeds :' + str(se.num_seeds)+ '\n' + 'peers :' + str(se.num_peers) + '\n' + 'download rate : ' + str(se.download_rate / 1000))
