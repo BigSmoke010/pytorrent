@@ -2,6 +2,7 @@ import wx
 import libtorrent as lt
 import time
 import threading
+from pubsub import pub
 
 class torthread(threading.Thread):
     def __init__(self, args):
@@ -16,8 +17,9 @@ class torthread(threading.Thread):
             se = added.status()
             x = se.progress * 100
             time.sleep(2)
+            pub.sendMessage('update', message=x)
 
-        wx.CallAfter(self.AfterRun)
+
     def AfterRun(self):
         dlg=wx.MessageDialog(None, 'Done', "Called after", wx.OK|wx.ICON_INFORMATION)
         dlg.ShowModal()
@@ -48,7 +50,10 @@ class MyFrame(wx.Frame):
         self.panel = wx.Panel(self)
         self.boxsizer = wx.BoxSizer(wx.HORIZONTAL)
         self.text = wx.StaticText(self.panel,-1,'Progress :' + str(self.x))
+        self.gaug = wx.Gauge(self.panel)
         self.boxsizer.Add(self.text)
+        self.boxsizer.Add(self.gaug)
+        pub.subscribe(self.updateprog, 'update')
         self.showmenu()
         self.Bind(wx.EVT_MENU, self.magnet, self.frstentry)
     def showmenu(self):
@@ -62,14 +67,17 @@ class MyFrame(wx.Frame):
         dilaog = magntdialog(None, title='show', size=(300,130))
         dilaog.ShowModal()
         dilaog.Destroy()
-
+    def updateprog(self,message,arg2=None):
+        self.gaug.SetValue(int(message))
+        self.text.SetLabelText(str(message))
+        print(message)
 
 class MyApp(wx.App):
     def __init__(self):
         super().__init__()
         self.frame = MyFrame(parent=None, title='pyTorrent')
         self.frame.Show()
-x = 0
+
 s = lt.session()
 app = MyApp()
 app.MainLoop()
