@@ -3,6 +3,7 @@ import libtorrent as lt
 import time
 import threading
 from pubsub import pub
+from wx.lib.agw import ultimatelistctrl as ULC
 
 class torthread(threading.Thread):
     def __init__(self, args):
@@ -15,9 +16,10 @@ class torthread(threading.Thread):
             print('got metada')
         while added.status().state != lt.torrent_status.seeding:
             se = added.status()
-            x = se.progress * 100
+            progress = se.progress * 100
+
             time.sleep(2)
-            pub.sendMessage('update', message=x)
+            pub.sendMessage('update', message=[progress])
 
 
     def AfterRun(self):
@@ -33,12 +35,15 @@ class magntdialog(wx.Dialog):
     def InitUi(self):
         self.panel = wx.Panel(self)
         boxsizr = wx.BoxSizer(wx.VERTICAL)
+        stbx = wx.StaticBox(self.panel,-1,'Submit Magnet Link')
+        sttcbx = wx.StaticBoxSizer(stbx, wx.VERTICAL)
         self.entry = wx.TextCtrl(self.panel,size=(200,30))
-        boxsizr.Add(wx.StaticText(self.panel, -1, 'please enter magnet'), 0, wx.ALIGN_CENTER)
-        boxsizr.Add(self.entry, 0, wx.ALIGN_CENTER)
-        boxsizr.Add(wx.Button(self.panel, -1, 'Submit'), 0, wx.ALIGN_CENTER)
-        self.panel.SetSizerAndFit(boxsizr)
+        sttcbx.Add(self.entry, 0, wx.ALIGN_CENTER)
+        sttcbx.Add(wx.Button(self.panel, -1, 'Submit'), 0, wx.ALIGN_CENTER)
+        boxsizr.Add(sttcbx, 0, wx.ALIGN_CENTER)
+        self.panel.SetSizer(boxsizr)
         self.panel.Bind(wx.EVT_BUTTON, self.getmagnet)
+
     def getmagnet(self, event):
         torthread(self.entry.GetValue())
         magntdialog.Destroy(self)
@@ -46,13 +51,24 @@ class magntdialog(wx.Dialog):
 class MyFrame(wx.Frame):
     def __init__(self, *args, **kw):
         super().__init__(*args, **kw)
-        self.x = 0
         self.panel = wx.Panel(self)
-        self.boxsizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.text = wx.StaticText(self.panel,-1,'Progress :' + str(self.x))
-        self.gaug = wx.Gauge(self.panel)
-        self.boxsizer.Add(self.text)
-        self.boxsizer.Add(self.gaug)
+        self.boxsizer = wx.BoxSizer(wx.VERTICAL)
+        self.ult = ULC.UltimateListCtrl(self.panel, agwStyle=wx.LC_REPORT)
+
+        info = ULC.UltimateListItem()
+        info._mask = wx.LIST_MASK_TEXT
+        info._text = "Name"
+        self.ult.InsertColumnInfo(0, info)
+        info = ULC.UltimateListItem()
+        info._mask = wx.LIST_MASK_TEXT
+        info._text = "Progress"
+        self.ult.InsertColumnInfo(1, info)
+        ultitem = ULC.UltimateListItem()
+        ultitem._
+        self.ult.SetColumnWidth(0, 150)
+        self.ult.SetColumnWidth(1, 150)
+        self.boxsizer.Add(self.ult, 1, wx.EXPAND)
+        self.panel.SetSizer(self.boxsizer)
         pub.subscribe(self.updateprog, 'update')
         self.showmenu()
         self.Bind(wx.EVT_MENU, self.magnet, self.frstentry)
@@ -64,12 +80,12 @@ class MyFrame(wx.Frame):
         self.mainmenu.Append(self.frstmenu, 'Open')
         self.SetMenuBar(self.mainmenu)
     def magnet(self, event):
-        dilaog = magntdialog(None, title='show', size=(300,130))
+        dilaog = magntdialog(None, title='show', size=(210,130))
         dilaog.ShowModal()
         dilaog.Destroy()
-    def updateprog(self,message,arg2=None):
-        self.gaug.SetValue(int(message))
-        self.text.SetLabelText(str(message))
+    def updateprog(self,message):
+        self.gaug.SetValue(int(message[0]))
+        self.text.SetLabelText(message)
         print(message)
 
 class MyApp(wx.App):
