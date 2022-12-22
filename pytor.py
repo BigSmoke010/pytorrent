@@ -6,6 +6,7 @@ import threading
 from pubsub import pub
 from wx.lib.agw import ultimatelistctrl as ULC
 import sqlite3
+import os
 
 class torthread(threading.Thread):
     def __init__(self, args):
@@ -13,7 +14,7 @@ class torthread(threading.Thread):
         self.start()
 
     def run(self):
-        self.db = sqlite3.connect('downloads.db')
+        self.db = sqlite3.connect('downloads.db', check_same_thread=False)
         self.curs = self.db.cursor()
         self.curs.execute('SELECT * FROM downloads')
         self.alls = self.curs.fetchall()
@@ -25,8 +26,8 @@ class torthread(threading.Thread):
         if parseduri.name in tmplist:
             self.added = s.add_torrent(lt.read_resume_data(self._args[4]))
         if parseduri.name not in tmplist:
-            self.added = s.add_torrent(parseduri, {'save_path' : './downloads/'})
-        pub.sendMessage('add', args=[parseduri.name, datetime.datetime.now(), self._args[3], lt.write_resume_data(lt.parse_magnet_uri(self._args[3]))])
+            self.added = s.add_torrent(parseduri)
+        pub.sendMessage('add', args=[parseduri.name, datetime.datetime.now(), self._args[3], lt.write_resume_data(lt.parse_magnet_uri(self._args[3])), self.added.status().save_path])
         while self.added.status().state != lt.torrent_status.seeding:
             se = self.added.status()
             progress = se.progress * 100
@@ -37,7 +38,7 @@ class torthread(threading.Thread):
             progress = se.progress * 100
             time.sleep(3)
             pub.sendMessage('update', message=[progress,se.num_seeds,se.num_peers, se.download_rate / 1000000, lt.write_resume_data(lt.parse_magnet_uri(self._args[3])), se.upload_rate / 1000000, se.state,parseduri.name])
-        self.db.close()
+
 
 class magntdialog(wx.Dialog):
     def __init__(self, *args, **kw):
@@ -62,14 +63,13 @@ class magntdialog(wx.Dialog):
 class MyFrame(wx.Frame):
     def __init__(self, *args, **kw):
         super().__init__(*args, **kw)
-        self.db =sqlite3.connect('downloads.db')
+        self.db =sqlite3.connect('downloads.db', check_same_thread=False)
         self.cur = self.db.cursor()
-        self.cur.execute('CREATE TABLE IF NOT EXISTS downloads (name, date, link, resumedata)')
+        self.cur.execute('CREATE TABLE IF NOT EXISTS downloads (name, date, link, resumedata, savepath)')
         self.panel = wx.Panel(self)
         self.boxsizer = wx.BoxSizer(wx.VERTICAL)
         self.indeex = 0
         self.ult = ULC.UltimateListCtrl(self.panel, agwStyle=wx.LC_REPORT)
-
         info = ULC.UltimateListItem()
         info._mask = wx.LIST_MASK_TEXT
         info._text = "Name"
@@ -115,11 +115,12 @@ class MyFrame(wx.Frame):
 
         self.cur.execute('SELECT oid,* FROM downloads')
         self.alldowns = self.cur.fetchall()
+        dirs = os.listdir('./')
+
         if self.alldowns != []:
             for i in self.alldowns:
                 torthread(i)
                 self.ult.InsertStringItem(i[0], i[1])
-
 
         self.boxsizer.Add(self.ult, 1, wx.EXPAND)
         self.panel.SetSizer(self.boxsizer)
@@ -140,7 +141,7 @@ class MyFrame(wx.Frame):
         dilaog.ShowModal()
         dilaog.Destroy()
     def updateprog(self,message):
-        self.db =sqlite3.connect('downloads.db')
+        self.db =sqlite3.connect('downloads.db', check_same_thread=False)
         self.cur = self.db.cursor()
         self.cur.execute('SELECT oid,* FROM downloads')
         self.alldowns = self.cur.fetchall()
@@ -160,7 +161,7 @@ class MyFrame(wx.Frame):
         self.db.close()
 
     def addtor(self, args):
-        self.db =sqlite3.connect('downloads.db')
+        self.db =sqlite3.connect('downloads.db', check_same_thread=False)
         self.cur = self.db.cursor()
         self.cur.execute('SELECT oid,* FROM downloads')
         self.alldowns = self.cur.fetchall()
@@ -170,12 +171,13 @@ class MyFrame(wx.Frame):
         if args[0] in tmplist:
             print('torrent already in')
         else:
-            self.cur.execute('INSERT INTO downloads VALUES (:torname,:tordate,:link, :resum)',
+            self.cur.execute('INSERT INTO downloads VALUES (:torname,:tordate,:link, :resum, :path)',
             {
                 'torname': args[0],
                 'tordate': args[1],
                 'link': args[2],
-                'resum': str(args[3])
+                'resum': str(args[3]),
+                'path':args[4]
             }
             )
             try:
