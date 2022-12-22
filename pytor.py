@@ -186,14 +186,11 @@ class MyFrame(wx.Frame):
         self.cur.close()
         self.db.close()
 
-
 class MyApp(wx.App):
     def __init__(self):
         super().__init__()
         self.frame = MyFrame(parent=None, title='pyTorrent', size=(650, 350))
         self.frame.Show()
-
-
 
 s = lt.session()
 app = MyApp()
