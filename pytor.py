@@ -17,29 +17,27 @@ class torthread(threading.Thread):
         self.curs = self.db.cursor()
         self.curs.execute('SELECT * FROM downloads')
         self.alls = self.curs.fetchall()
+
         parseduri = lt.parse_magnet_uri(self._args[3])
         tmplist = []
         for im in self.alls:
             tmplist.append(im[1])
         if parseduri.name in tmplist:
-            print('torrent already in')
             self.added = s.add_torrent(lt.read_resume_data(self._args[4]))
         if parseduri.name not in tmplist:
-            self.added = s.add_torrent(parseduri)
+            self.added = s.add_torrent(parseduri, {'save_path' : './downloads/'})
         pub.sendMessage('add', args=[parseduri.name, datetime.datetime.now(), self._args[3], lt.write_resume_data(lt.parse_magnet_uri(self._args[3]))])
         while self.added.status().state != lt.torrent_status.seeding:
-            print('downloading')
             se = self.added.status()
             progress = se.progress * 100
             time.sleep(3)
-            pub.sendMessage('update', message=[progress,se.num_seeds,se.num_peers, se.download_rate / 1000000, lt.write_resume_data(lt.parse_magnet_uri(self._args[3])), se.upload_rate / 1000000, se.state])
+            pub.sendMessage('update', message=[progress,se.num_seeds,se.num_peers, se.download_rate / 1000000, lt.write_resume_data(lt.parse_magnet_uri(self._args[3])), se.upload_rate / 1000000, se.state,parseduri.name])
         while self.added.status().state == lt.torrent_status.seeding:
-            print('seeding')
             se = self.added.status()
             progress = se.progress * 100
             time.sleep(3)
-            pub.sendMessage('update', message=[progress,se.num_seeds,se.num_peers, se.download_rate / 1000000, lt.write_resume_data(lt.parse_magnet_uri(self._args[3])), se.upload_rate / 1000000, se.state])
-
+            pub.sendMessage('update', message=[progress,se.num_seeds,se.num_peers, se.download_rate / 1000000, lt.write_resume_data(lt.parse_magnet_uri(self._args[3])), se.upload_rate / 1000000, se.state,parseduri.name])
+        self.db.close()
 
 class magntdialog(wx.Dialog):
     def __init__(self, *args, **kw):
@@ -58,7 +56,7 @@ class magntdialog(wx.Dialog):
         self.panel.Bind(wx.EVT_BUTTON, self.getmagnet)
 
     def getmagnet(self, event):
-        torthread(self.entry.GetValue())
+        torthread([None, None, None,self.entry.GetValue()])
         magntdialog.Destroy(self)
 
 class MyFrame(wx.Frame):
@@ -69,7 +67,7 @@ class MyFrame(wx.Frame):
         self.cur.execute('CREATE TABLE IF NOT EXISTS downloads (name, date, link, resumedata)')
         self.panel = wx.Panel(self)
         self.boxsizer = wx.BoxSizer(wx.VERTICAL)
-
+        self.indeex = 0
         self.ult = ULC.UltimateListCtrl(self.panel, agwStyle=wx.LC_REPORT)
 
         info = ULC.UltimateListItem()
@@ -117,9 +115,11 @@ class MyFrame(wx.Frame):
 
         self.cur.execute('SELECT oid,* FROM downloads')
         self.alldowns = self.cur.fetchall()
-        for i in self.alldowns:
-            torthread(i)
-            self.ult.InsertStringItem(i[0], i[1])
+        if self.alldowns != []:
+            for i in self.alldowns:
+                torthread(i)
+                self.ult.InsertStringItem(i[0], i[1])
+
 
         self.boxsizer.Add(self.ult, 1, wx.EXPAND)
         self.panel.SetSizer(self.boxsizer)
@@ -144,18 +144,19 @@ class MyFrame(wx.Frame):
         self.cur = self.db.cursor()
         self.cur.execute('SELECT oid,* FROM downloads')
         self.alldowns = self.cur.fetchall()
-        self.ult.SetStringItem(self.alldowns[-1][0] - 1, 1, str(round(message[0], 1)) + '%')
-        self.ult.SetStringItem(self.alldowns[-1][0] - 1, 2, str(message[6]))
-        self.ult.SetStringItem(self.alldowns[-1][0] - 1, 3, str(message[1]))
-        self.ult.SetStringItem(self.alldowns[-1][0] - 1, 4, str(message[2]))
-        self.ult.SetStringItem(self.alldowns[-1][0] - 1, 5, str(round(message[3], 1)) + 'MB')
-        self.ult.SetStringItem(self.alldowns[-1][0] - 1, 6, str(message[5]) + 'MB')
-        print(message[5])
-        self.cur.execute('UPDATE downloads SET resumedata = :reumed WHERE oid = :id',
-        {
-            'id' :self.alldowns[-1][0],
-            'reumed' : str(message[4])
-        })
+        for x,y in enumerate(self.alldowns):
+            if y[1] == message[7]:
+                self.ult.SetStringItem(self.alldowns[x][0] - 1, 1, str(round(message[0], 1)) + '%')
+                self.ult.SetStringItem(self.alldowns[x][0] - 1, 2, str(message[6]))
+                self.ult.SetStringItem(self.alldowns[x][0] - 1, 3, str(message[1]))
+                self.ult.SetStringItem(self.alldowns[x][0] - 1, 4, str(message[2]))
+                self.ult.SetStringItem(self.alldowns[x][0] - 1, 5, str(round(message[3], 1)) + 'MB')
+                self.ult.SetStringItem(self.alldowns[x][0] - 1, 6, str(message[5]) + 'MB')
+                self.cur.execute('UPDATE downloads SET resumedata = :reumed WHERE oid = :id',
+                {
+                    'id' :x,
+                    'reumed' : str(message[4])
+                })
         self.db.close()
 
     def addtor(self, args):
@@ -173,8 +174,8 @@ class MyFrame(wx.Frame):
             {
                 'torname': args[0],
                 'tordate': args[1],
-                'link':args[2],
-                'resum': args[3]
+                'link': args[2],
+                'resum': str(args[3])
             }
             )
             try:
