@@ -18,22 +18,69 @@ class torthread(threading.Thread):
         self.curs = self.db.cursor()
         self.curs.execute('SELECT * FROM downloads')
         self.alls = self.curs.fetchall()
-
+        self.db.close()
         parseduri = lt.parse_magnet_uri(self._args[3])
+        parseduri.save_path = './downloads/'
         tmplist = []
         for im in self.alls:
-            tmplist.append(im[1])
+            tmplist.append(im[0])
         if parseduri.name in tmplist:
-            self.added = s.add_torrent(lt.read_resume_data(self._args[4]))
+            with open('resumedata/' + parseduri.name, 'rb') as r:
+                print('reading')
+                resumedata = lt.read_resume_data(r.read())
+                resumedata.save_path = './downloads/'
+                self.added = s.add_torrent(resumedata)
         if parseduri.name not in tmplist:
+            print('not reading')
+            parseduri.save_path = './downloads/'
             self.added = s.add_torrent(parseduri)
         pub.sendMessage('add', args=[parseduri.name, datetime.datetime.now(), self._args[3], lt.write_resume_data(lt.parse_magnet_uri(self._args[3])), self.added.status().save_path])
         while self.added.status().state != lt.torrent_status.seeding:
+            x = lt.write_resume_data_buf(lt.parse_magnet_uri(self._args[3]))
+            try:
+                os.remove('among')
+            except FileNotFoundError:
+                pass
+            with open ('resumedata/' + parseduri.name, 'wb') as f:
+                f.write(x)
+            self.db = sqlite3.connect('downloads.db', check_same_thread=False)
+            self.curs = self.db.cursor()
+            self.curs.execute('SELECT * FROM downloads')
+            self.alls = self.curs.fetchall()
+            for im in self.alls:
+                if parseduri.name not in tmplist:
+                    tmplist.append(im[0])
+            print(tmplist)
+            print(parseduri.name)
+            if parseduri.name not in tmplist:
+                print('bb')
+                self.added.stop()
+                break
             se = self.added.status()
             progress = se.progress * 100
             time.sleep(3)
             pub.sendMessage('update', message=[progress,se.num_seeds,se.num_peers, se.download_rate / 1000000, lt.write_resume_data(lt.parse_magnet_uri(self._args[3])), se.upload_rate / 1000000, se.state,parseduri.name])
         while self.added.status().state == lt.torrent_status.seeding:
+            x = lt.write_resume_data_buf(lt.parse_magnet_uri(self._args[3]))
+            try:
+                os.remove('among')
+            except FileNotFoundError:
+                pass
+            with open ('among', 'wb') as f:
+                f.write(x)
+            self.db = sqlite3.connect('downloads.db', check_same_thread=False)
+            self.curs = self.db.cursor()
+            self.curs.execute('SELECT * FROM downloads')
+            self.alls = self.curs.fetchall()
+            for im in self.alls:
+                if parseduri.name not in tmplist:
+                    tmplist.append(im[0])
+            print(tmplist)
+            print(parseduri.name)
+            if parseduri.name not in tmplist:
+                print('bb')
+                self.added.stop()
+                break
             se = self.added.status()
             progress = se.progress * 100
             time.sleep(3)
@@ -65,7 +112,7 @@ class MyFrame(wx.Frame):
         super().__init__(*args, **kw)
         self.db =sqlite3.connect('downloads.db', check_same_thread=False)
         self.cur = self.db.cursor()
-        self.cur.execute('CREATE TABLE IF NOT EXISTS downloads (name, date, link, resumedata, savepath)')
+        self.cur.execute('CREATE TABLE IF NOT EXISTS downloads (name, date, link)')
         self.panel = wx.Panel(self)
         self.boxsizer = wx.BoxSizer(wx.VERTICAL)
         self.indeex = 0
@@ -115,7 +162,7 @@ class MyFrame(wx.Frame):
 
         self.cur.execute('SELECT oid,* FROM downloads')
         self.alldowns = self.cur.fetchall()
-        dirs = os.listdir('./')
+        print(len(self.alldowns))
 
         if self.alldowns != []:
             for i in self.alldowns:
@@ -128,7 +175,29 @@ class MyFrame(wx.Frame):
         pub.subscribe(self.addtor, 'add')
         self.showmenu()
         self.Bind(wx.EVT_MENU, self.magnet, self.frstentry)
+        self.Bind(wx.EVT_LIST_ITEM_RIGHT_CLICK, self.OnRight)
+
+    def OnRight(self, event: wx.Event):
+        # show Right-Click-Menu
+        popupmenu = wx.Menu()
+        Pause = popupmenu.Append(-1, "Pause")
+        Delete = popupmenu.Append(-1, 'Delete')
+        self.Bind(wx.EVT_MENU, self.OnPause, Pause)
+        self.Bind(wx.EVT_MENU, self.OnDelete, Delete)
+        self.ult.PopupMenu(popupmenu)
+
+    def OnPause(self, event):
+        print(self.ult.GetFirstSelected())
+
+    def OnDelete(self, event):
+        self.db = sqlite3.connect('downloads.db', check_same_thread=False)
+        self.cur = self.db.cursor()
+        ind = self.ult.GetFirstSelected()
+        self.cur.execute('DELETE FROM downloads WHERE oid =' + str(ind +  1))
+        self.ult.DeleteItem(ind)
+        self.db.commit()
         self.db.close()
+
     def showmenu(self):
         self.frstmenu = wx.Menu()
         self.frstentry = self.frstmenu.Append(0, item='Add Magnet')
@@ -141,7 +210,7 @@ class MyFrame(wx.Frame):
         dilaog.ShowModal()
         dilaog.Destroy()
     def updateprog(self,message):
-        self.db =sqlite3.connect('downloads.db', check_same_thread=False)
+        self.db = sqlite3.connect('downloads.db', check_same_thread=False)
         self.cur = self.db.cursor()
         self.cur.execute('SELECT oid,* FROM downloads')
         self.alldowns = self.cur.fetchall()
@@ -153,12 +222,7 @@ class MyFrame(wx.Frame):
                 self.ult.SetStringItem(self.alldowns[x][0] - 1, 4, str(message[2]))
                 self.ult.SetStringItem(self.alldowns[x][0] - 1, 5, str(round(message[3], 1)) + 'MB')
                 self.ult.SetStringItem(self.alldowns[x][0] - 1, 6, str(message[5]) + 'MB')
-                self.cur.execute('UPDATE downloads SET resumedata = :reumed WHERE oid = :id',
-                {
-                    'id' :x,
-                    'reumed' : str(message[4])
-                })
-        self.db.close()
+
 
     def addtor(self, args):
         self.db =sqlite3.connect('downloads.db', check_same_thread=False)
@@ -171,13 +235,11 @@ class MyFrame(wx.Frame):
         if args[0] in tmplist:
             print('torrent already in')
         else:
-            self.cur.execute('INSERT INTO downloads VALUES (:torname,:tordate,:link, :resum, :path)',
+            self.cur.execute('INSERT INTO downloads VALUES (:torname,:tordate,:link)',
             {
                 'torname': args[0],
                 'tordate': args[1],
-                'link': args[2],
-                'resum': str(args[3]),
-                'path':args[4]
+                'link': args[2]
             }
             )
             try:
@@ -192,7 +254,7 @@ class MyFrame(wx.Frame):
 class MyApp(wx.App):
     def __init__(self):
         super().__init__()
-        self.frame = MyFrame(parent=None, title='pyTorrent', size=(650, 350))
+        self.frame = MyFrame(parent=None, title='pyTorrent', size=(800, 350))
         self.frame.Show()
 
 s = lt.session()
