@@ -7,54 +7,69 @@ from pubsub import pub
 from wx.lib.agw import ultimatelistctrl as ULC
 import sqlite3
 import os
+import shutil
+import difflib
 
 class torthread(threading.Thread):
     def __init__(self, args):
         super().__init__(args=args)
         pub.subscribe(self.deletetorrent, 'deletetor')
         pub.subscribe(self.pausetorrent, 'pausetor')
-        self.paused = False
+        pub.subscribe(self.resumetorrent, 'resumetor')
         self.start()
 
     def run(self):
         self.db = sqlite3.connect('downloads.db', check_same_thread=False)
         self.curs = self.db.cursor()
         self.curs.execute('SELECT * FROM downloads')
+        self.paused = False
+        self.resumed = True
+        self.deleted = False
         self.alls = self.curs.fetchall()
         self.db.close()
-
         self.parseduri = lt.parse_magnet_uri(self._args[3])
         self.parseduri.save_path = './downloads/'
         tmplist = []
         for im in self.alls:
             tmplist.append(im[0])
         if self.parseduri.name in tmplist:
-            with open('resumedata/' + self.parseduri.name, 'rb') as r:
-                print('reading')
-                resumedata = lt.read_resume_data(r.read())
-                resumedata.save_path = './downloads/'
-                self.added = s.add_torrent(resumedata)
+            try:
+                with open('resumedata/' + self.parseduri.name, 'rb') as r:
+                    print('reading')
+                    resumedata = lt.read_resume_data(r.read())
+                    resumedata.save_path = './downloads/'
+                    self.added = s.add_torrent(resumedata)
+            except FileNotFoundError:
+                print('not reading')
+                self.parseduri.save_path = './downloads/'
+                self.added = s.add_torrent(self.parseduri)
         if self.parseduri.name not in tmplist:
             print('not reading')
             self.parseduri.save_path = './downloads/'
             self.added = s.add_torrent(self.parseduri)
         pub.sendMessage('add', args=[self.parseduri.name, datetime.datetime.now(), self._args[3], lt.write_resume_data(lt.parse_magnet_uri(self._args[3])), self.added.status().save_path])
 
-        while self.added.status().state != lt.torrent_status.seeding:
-            if self.paused:
+        while self.added.status().state != lt.torrent_status.seeding and not self.deleted:
+
+            if self.paused and not self.resumed:
                 self.added.pause()
+            if self.resumed and not self.paused:
+                self.added.resume()
+
             x = lt.write_resume_data_buf(lt.parse_magnet_uri(self._args[3]))
             with open ('resumedata/' + self.parseduri.name, 'wb') as f:
                 f.write(x)
             se = self.added.status()
             progress = se.progress * 100
-            time.sleep(3)
+            time.sleep(2)
             pub.sendMessage('update', message=[progress,se.num_seeds,se.num_peers, se.download_rate / 1000000, lt.write_resume_data(lt.parse_magnet_uri(self._args[3])), se.upload_rate / 1000000, se.state,self.parseduri.name])
             tmplist.clear()
 
-        while self.added.status().state == lt.torrent_status.seeding:
-            if self.paused:
+        while self.added.status().state == lt.torrent_status.seeding and not self.deleted:
+            if self.paused and not self.resumed:
                 self.added.pause()
+            if self.resumed and not self.paused:
+                self.added.resume()
             x = lt.write_resume_data_buf(lt.parse_magnet_uri(self._args[3]))
             with open ('among', 'wb') as f:
                 f.write(x)
@@ -63,13 +78,29 @@ class torthread(threading.Thread):
             time.sleep(3)
             pub.sendMessage('update', message=[progress,se.num_seeds,se.num_peers, se.download_rate / 1000000, lt.write_resume_data(lt.parse_magnet_uri(self._args[3])), se.upload_rate / 1000000, se.state,self.parseduri.name])
             tmplist.clear()
-    def deletetorrent(self):
-        self.added.pause()
-        print(self.parseduri.name)
-        os.remove('resumedata/' + self.parseduri.name)
-        os.remove('downloads/' + self.parseduri.name)
-    def pausetorrent(self):
-        self.paused = not self.paused
+    def deletetorrent(self, args):
+        if self.parseduri.name == args:
+            self.added.pause()
+            self.deleted = True
+            try:
+                shutil.rmtree('downloads/' + difflib.get_close_matches(self.parseduri.name, os.listdir('./downloads/'))[0])
+            except NotADirectoryError:
+                os.remove('downloads/' + difflib.get_close_matches(self.parseduri.name, os.listdir('./downloads/'))[0])
+            time.sleep(3)
+            os.remove('resumedata/' + difflib.get_close_matches(self.parseduri.name, os.listdir('./resumedata/'))[0])
+
+    def pausetorrent(self, args):
+        if self.parseduri.name == args:
+            self.paused = not self.paused
+            self.resumed = not self.resumed
+            print(f'pause {self.paused}, reesum {self.resumed}')
+
+    def resumetorrent(self, args):
+        if self.parseduri.name == args:
+            self.paused = not self.paused
+            self.resumed = not self.resumed
+            print(f'pause {self.paused}, reesum {self.resumed}')
+
 
 class magntdialog(wx.Dialog):
     def __init__(self, *args, **kw):
@@ -100,7 +131,7 @@ class MyFrame(wx.Frame):
         self.panel = wx.Panel(self)
         self.boxsizer = wx.BoxSizer(wx.VERTICAL)
         self.indeex = 0
-        self.ult = ULC.UltimateListCtrl(self.panel, agwStyle=wx.LC_REPORT)
+        self.ult = ULC.UltimateListCtrl(self.panel, agwStyle= wx.LC_REPORT)
         info = ULC.UltimateListItem()
         info._mask = wx.LIST_MASK_TEXT
         info._text = "Name"
@@ -163,21 +194,42 @@ class MyFrame(wx.Frame):
     def OnRight(self, event):
         popupmenu = wx.Menu()
         Pause = popupmenu.Append(-1, "Pause")
+        Resume = popupmenu.Append(-1, "Resume")
         Delete = popupmenu.Append(-1, 'Delete With Files')
         self.Bind(wx.EVT_MENU, self.OnPause, Pause)
         self.Bind(wx.EVT_MENU, self.OnDelete, Delete)
+        self.Bind(wx.EVT_MENU, self.OnResume, Resume)
         self.ult.PopupMenu(popupmenu)
+    def OnResume(self, event):
+        self.db = sqlite3.connect('downloads.db', check_same_thread=False)
+        self.cur = self.db.cursor()
+        self.cur.execute('SELECT * FROM downloads')
+        self.all = self.cur.fetchall()
+        ind = self.ult.GetFirstSelected()
+        print('resuming')
+        print(self.all)
+        pub.sendMessage('resumetor', args=self.all[ind][0])
+
     def OnPause(self, event):
-        pub.sendMessage('pausetor')
+        self.db = sqlite3.connect('downloads.db', check_same_thread=False)
+        self.cur = self.db.cursor()
+        self.cur.execute('SELECT * FROM downloads')
+        self.all = self.cur.fetchall()
+        ind = self.ult.GetFirstSelected()
+        print('pausing')
+        print(self.all)
+        pub.sendMessage('pausetor', args=self.all[ind][0])
     def OnDelete(self, event):
         self.db = sqlite3.connect('downloads.db', check_same_thread=False)
         self.cur = self.db.cursor()
+        self.cur.execute('SELECT * FROM downloads')
+        self.all = self.cur.fetchall()
         ind = self.ult.GetFirstSelected()
-        self.cur.execute('DELETE FROM downloads WHERE oid =' + str(ind +  1))
-        pub.sendMessage('deletetor')
+        self.cur.execute('DELETE FROM downloads WHERE oid =' + str(ind + 1))
         self.ult.DeleteItem(ind)
         self.db.commit()
         self.db.close()
+        pub.sendMessage('deletetor', args=self.all[ind][0])
 
     def showmenu(self):
         self.frstmenu = wx.Menu()
@@ -191,6 +243,7 @@ class MyFrame(wx.Frame):
         dilaog = magntdialog(None, title='show', size=(210,130))
         dilaog.ShowModal()
         dilaog.Destroy()
+
     def updateprog(self,message):
         self.db = sqlite3.connect('downloads.db', check_same_thread=False)
         self.cur = self.db.cursor()
