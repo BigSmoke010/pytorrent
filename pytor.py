@@ -11,6 +11,9 @@ import os
 class torthread(threading.Thread):
     def __init__(self, args):
         super().__init__(args=args)
+        pub.subscribe(self.deletetorrent, 'deletetor')
+        pub.subscribe(self.pausetorrent, 'pausetor')
+        self.paused = False
         self.start()
 
     def run(self):
@@ -19,73 +22,54 @@ class torthread(threading.Thread):
         self.curs.execute('SELECT * FROM downloads')
         self.alls = self.curs.fetchall()
         self.db.close()
-        parseduri = lt.parse_magnet_uri(self._args[3])
-        parseduri.save_path = './downloads/'
+
+        self.parseduri = lt.parse_magnet_uri(self._args[3])
+        self.parseduri.save_path = './downloads/'
         tmplist = []
         for im in self.alls:
             tmplist.append(im[0])
-        if parseduri.name in tmplist:
-            with open('resumedata/' + parseduri.name, 'rb') as r:
+        if self.parseduri.name in tmplist:
+            with open('resumedata/' + self.parseduri.name, 'rb') as r:
                 print('reading')
                 resumedata = lt.read_resume_data(r.read())
                 resumedata.save_path = './downloads/'
                 self.added = s.add_torrent(resumedata)
-        if parseduri.name not in tmplist:
+        if self.parseduri.name not in tmplist:
             print('not reading')
-            parseduri.save_path = './downloads/'
-            self.added = s.add_torrent(parseduri)
-        pub.sendMessage('add', args=[parseduri.name, datetime.datetime.now(), self._args[3], lt.write_resume_data(lt.parse_magnet_uri(self._args[3])), self.added.status().save_path])
+            self.parseduri.save_path = './downloads/'
+            self.added = s.add_torrent(self.parseduri)
+        pub.sendMessage('add', args=[self.parseduri.name, datetime.datetime.now(), self._args[3], lt.write_resume_data(lt.parse_magnet_uri(self._args[3])), self.added.status().save_path])
+
         while self.added.status().state != lt.torrent_status.seeding:
+            if self.paused:
+                self.added.pause()
             x = lt.write_resume_data_buf(lt.parse_magnet_uri(self._args[3]))
-            try:
-                os.remove('among')
-            except FileNotFoundError:
-                pass
-            with open ('resumedata/' + parseduri.name, 'wb') as f:
+            with open ('resumedata/' + self.parseduri.name, 'wb') as f:
                 f.write(x)
-            self.db = sqlite3.connect('downloads.db', check_same_thread=False)
-            self.curs = self.db.cursor()
-            self.curs.execute('SELECT * FROM downloads')
-            self.alls = self.curs.fetchall()
-            for im in self.alls:
-                if parseduri.name not in tmplist:
-                    tmplist.append(im[0])
-            print(tmplist)
-            print(parseduri.name)
-            if parseduri.name not in tmplist:
-                print('bb')
-                self.added.stop()
-                break
             se = self.added.status()
             progress = se.progress * 100
             time.sleep(3)
-            pub.sendMessage('update', message=[progress,se.num_seeds,se.num_peers, se.download_rate / 1000000, lt.write_resume_data(lt.parse_magnet_uri(self._args[3])), se.upload_rate / 1000000, se.state,parseduri.name])
+            pub.sendMessage('update', message=[progress,se.num_seeds,se.num_peers, se.download_rate / 1000000, lt.write_resume_data(lt.parse_magnet_uri(self._args[3])), se.upload_rate / 1000000, se.state,self.parseduri.name])
+            tmplist.clear()
+
         while self.added.status().state == lt.torrent_status.seeding:
+            if self.paused:
+                self.added.pause()
             x = lt.write_resume_data_buf(lt.parse_magnet_uri(self._args[3]))
-            try:
-                os.remove('among')
-            except FileNotFoundError:
-                pass
             with open ('among', 'wb') as f:
                 f.write(x)
-            self.db = sqlite3.connect('downloads.db', check_same_thread=False)
-            self.curs = self.db.cursor()
-            self.curs.execute('SELECT * FROM downloads')
-            self.alls = self.curs.fetchall()
-            for im in self.alls:
-                if parseduri.name not in tmplist:
-                    tmplist.append(im[0])
-            print(tmplist)
-            print(parseduri.name)
-            if parseduri.name not in tmplist:
-                print('bb')
-                self.added.stop()
-                break
             se = self.added.status()
             progress = se.progress * 100
             time.sleep(3)
-            pub.sendMessage('update', message=[progress,se.num_seeds,se.num_peers, se.download_rate / 1000000, lt.write_resume_data(lt.parse_magnet_uri(self._args[3])), se.upload_rate / 1000000, se.state,parseduri.name])
-
+            pub.sendMessage('update', message=[progress,se.num_seeds,se.num_peers, se.download_rate / 1000000, lt.write_resume_data(lt.parse_magnet_uri(self._args[3])), se.upload_rate / 1000000, se.state,self.parseduri.name])
+            tmplist.clear()
+    def deletetorrent(self):
+        self.added.pause()
+        print(self.parseduri.name)
+        os.remove('resumedata/' + self.parseduri.name)
+        os.remove('downloads/' + self.parseduri.name)
+    def pausetorrent(self):
+        self.paused = not self.paused
 
 class magntdialog(wx.Dialog):
     def __init__(self, *args, **kw):
@@ -162,7 +146,6 @@ class MyFrame(wx.Frame):
 
         self.cur.execute('SELECT oid,* FROM downloads')
         self.alldowns = self.cur.fetchall()
-        print(len(self.alldowns))
 
         if self.alldowns != []:
             for i in self.alldowns:
@@ -177,23 +160,21 @@ class MyFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.magnet, self.frstentry)
         self.Bind(wx.EVT_LIST_ITEM_RIGHT_CLICK, self.OnRight)
 
-    def OnRight(self, event: wx.Event):
-        # show Right-Click-Menu
+    def OnRight(self, event):
         popupmenu = wx.Menu()
         Pause = popupmenu.Append(-1, "Pause")
-        Delete = popupmenu.Append(-1, 'Delete')
+        Delete = popupmenu.Append(-1, 'Delete With Files')
         self.Bind(wx.EVT_MENU, self.OnPause, Pause)
         self.Bind(wx.EVT_MENU, self.OnDelete, Delete)
         self.ult.PopupMenu(popupmenu)
-
     def OnPause(self, event):
-        print(self.ult.GetFirstSelected())
-
+        pub.sendMessage('pausetor')
     def OnDelete(self, event):
         self.db = sqlite3.connect('downloads.db', check_same_thread=False)
         self.cur = self.db.cursor()
         ind = self.ult.GetFirstSelected()
         self.cur.execute('DELETE FROM downloads WHERE oid =' + str(ind +  1))
+        pub.sendMessage('deletetor')
         self.ult.DeleteItem(ind)
         self.db.commit()
         self.db.close()
@@ -205,6 +186,7 @@ class MyFrame(wx.Frame):
         self.mainmenu = wx.MenuBar()
         self.mainmenu.Append(self.frstmenu, 'Open')
         self.SetMenuBar(self.mainmenu)
+
     def magnet(self, event):
         dilaog = magntdialog(None, title='show', size=(210,130))
         dilaog.ShowModal()
@@ -222,8 +204,6 @@ class MyFrame(wx.Frame):
                 self.ult.SetStringItem(self.alldowns[x][0] - 1, 4, str(message[2]))
                 self.ult.SetStringItem(self.alldowns[x][0] - 1, 5, str(round(message[3], 1)) + 'MB')
                 self.ult.SetStringItem(self.alldowns[x][0] - 1, 6, str(message[5]) + 'MB')
-
-
     def addtor(self, args):
         self.db =sqlite3.connect('downloads.db', check_same_thread=False)
         self.cur = self.db.cursor()
