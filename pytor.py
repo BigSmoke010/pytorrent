@@ -15,7 +15,6 @@ class torthread(threading.Thread):
         super().__init__(args=args)
         pub.subscribe(self.deletetorrent, 'deletetor')
         pub.subscribe(self.pausetorrent, 'pausetor')
-        pub.subscribe(self.resumetorrent, 'resumetor')
         self.start()
 
     def run(self):
@@ -28,41 +27,36 @@ class torthread(threading.Thread):
         self.alls = self.curs.fetchall()
         self.db.close()
         self.parseduri = lt.parse_magnet_uri(self._args[3])
-        self.parseduri.save_path = './downloads/'
+        self.parseduri.save_path = self._args[4]
         tmplist = []
         for im in self.alls:
             tmplist.append(im[0])
         if self.parseduri.name in tmplist:
             try:
                 with open('resumedata/' + self.parseduri.name, 'rb') as r:
-                    print('reading')
                     resumedata = lt.read_resume_data(r.read())
-                    resumedata.save_path = './downloads/'
+                    resumedata.save_path = self._args[4]
                     self.added = s.add_torrent(resumedata)
             except FileNotFoundError:
-                print('not reading')
-                self.parseduri.save_path = './downloads/'
+                self.parseduri.save_path = self._args[4]
                 self.added = s.add_torrent(self.parseduri)
         if self.parseduri.name not in tmplist:
-            print('not reading')
-            self.parseduri.save_path = './downloads/'
+            self.parseduri.save_path = self._args[4]
             self.added = s.add_torrent(self.parseduri)
-        pub.sendMessage('add', args=[self.parseduri.name, datetime.datetime.now(), self._args[3], lt.write_resume_data(lt.parse_magnet_uri(self._args[3])), self.added.status().save_path])
+        pub.sendMessage('add', args=[self.parseduri.name, datetime.datetime.now(), self._args[3], self._args[4]])
 
         while self.added.status().state != lt.torrent_status.seeding and not self.deleted:
-
             if self.paused and not self.resumed:
                 self.added.pause()
             if self.resumed and not self.paused:
                 self.added.resume()
-
             x = lt.write_resume_data_buf(lt.parse_magnet_uri(self._args[3]))
             with open ('resumedata/' + self.parseduri.name, 'wb') as f:
                 f.write(x)
             se = self.added.status()
             progress = se.progress * 100
-            time.sleep(2)
-            pub.sendMessage('update', message=[progress,se.num_seeds,se.num_peers, se.download_rate / 1000000, lt.write_resume_data(lt.parse_magnet_uri(self._args[3])), se.upload_rate / 1000000, se.state,self.parseduri.name])
+            time.sleep(5)
+            pub.sendMessage('update', message=[progress,se.num_seeds,se.num_peers, se.download_rate / 1000000, se.upload_rate / 1000000, se.state,self.parseduri.name])
             tmplist.clear()
 
         while self.added.status().state == lt.torrent_status.seeding and not self.deleted:
@@ -71,21 +65,22 @@ class torthread(threading.Thread):
             if self.resumed and not self.paused:
                 self.added.resume()
             x = lt.write_resume_data_buf(lt.parse_magnet_uri(self._args[3]))
-            with open ('among', 'wb') as f:
+            with open ('resumedata/' + self.parseduri.name, 'wb') as f:
                 f.write(x)
             se = self.added.status()
             progress = se.progress * 100
-            time.sleep(3)
-            pub.sendMessage('update', message=[progress,se.num_seeds,se.num_peers, se.download_rate / 1000000, lt.write_resume_data(lt.parse_magnet_uri(self._args[3])), se.upload_rate / 1000000, se.state,self.parseduri.name])
+            time.sleep(5)
+            pub.sendMessage('update', message=[progress,se.num_seeds,se.num_peers, se.download_rate / 1000000, se.upload_rate / 1000000, se.state,self.parseduri.name])
             tmplist.clear()
+
     def deletetorrent(self, args):
         if self.parseduri.name == args:
-            self.added.pause()
             self.deleted = True
+            self.added.pause()
             try:
-                shutil.rmtree('downloads/' + difflib.get_close_matches(self.parseduri.name, os.listdir('./downloads/'))[0])
+                shutil.rmtree(self._args[4] + difflib.get_close_matches(self.parseduri.name, os.listdir('./downloads/'))[0])
             except NotADirectoryError:
-                os.remove('downloads/' + difflib.get_close_matches(self.parseduri.name, os.listdir('./downloads/'))[0])
+                os.remove(self._args[4] + difflib.get_close_matches(self.parseduri.name, os.listdir('./downloads/'))[0])
             time.sleep(3)
             os.remove('resumedata/' + difflib.get_close_matches(self.parseduri.name, os.listdir('./resumedata/'))[0])
 
@@ -93,14 +88,6 @@ class torthread(threading.Thread):
         if self.parseduri.name == args:
             self.paused = not self.paused
             self.resumed = not self.resumed
-            print(f'pause {self.paused}, reesum {self.resumed}')
-
-    def resumetorrent(self, args):
-        if self.parseduri.name == args:
-            self.paused = not self.paused
-            self.resumed = not self.resumed
-            print(f'pause {self.paused}, reesum {self.resumed}')
-
 
 class magntdialog(wx.Dialog):
     def __init__(self, *args, **kw):
@@ -108,30 +95,44 @@ class magntdialog(wx.Dialog):
         self.InitUi()
     def InitUi(self):
         self.panel = wx.Panel(self)
-        boxsizr = wx.BoxSizer(wx.VERTICAL)
+        gridsizr = wx.GridSizer(1,2,1,1)
         stbx = wx.StaticBox(self.panel,-1,'Submit Magnet Link')
         sttcbx = wx.StaticBoxSizer(stbx, wx.VERTICAL)
         self.entry = wx.TextCtrl(self.panel,size=(250,30))
+        self.entry2 = wx.TextCtrl(self.panel, size=(200, 30))
+        self.pathbutton = wx.Button(self.panel, -1, 'Select Path')
+        self.magnetbutton = wx.Button(self.panel, -1, 'Submit')
         sttcbx.Add(self.entry, 0, wx.ALIGN_CENTER)
-        sttcbx.Add(wx.Button(self.panel, -1, 'Submit'), 0, wx.ALIGN_CENTER)
-        boxsizr.Add(sttcbx, 0, wx.ALIGN_CENTER)
-        self.panel.SetSizer(boxsizr)
-        self.panel.Bind(wx.EVT_BUTTON, self.getmagnet)
+        sttcbx.Add(self.magnetbutton, 0, wx.ALIGN_CENTER)
+        stbx2 = wx.StaticBox(self.panel,-1, 'Path', size=(300,200))
+        sttcbx2 = wx.StaticBoxSizer(stbx2)
+        sttcbx2.Add(self.pathbutton)
+        sttcbx2.Add(self.entry2)
+        gridsizr.Add(sttcbx, 0, wx.ALIGN_LEFT)
+        gridsizr.Add(sttcbx2, 0, wx.ALIGN_RIGHT)
+        self.panel.SetSizer(gridsizr)
+        self.panel.Bind(wx.EVT_BUTTON, self.getmagnet, self.magnetbutton)
+        self.panel.Bind(wx.EVT_BUTTON, self.setpath, self.pathbutton)
 
     def getmagnet(self, event):
-        torthread([None, None, None,self.entry.GetValue()])
+        torthread([None, None, None,self.entry.GetValue(), self.entry2.GetValue()])
         magntdialog.Destroy(self)
+
+    def setpath(self, event):
+        filepath = wx.DirDialog(None, 'Select Folder', './downloads/', wx.DD_DEFAULT_STYLE)
+        filepath.ShowModal()
+        self.entry2.SetValue(filepath.GetPath())
 
 class MyFrame(wx.Frame):
     def __init__(self, *args, **kw):
         super().__init__(*args, **kw)
         self.db =sqlite3.connect('downloads.db', check_same_thread=False)
         self.cur = self.db.cursor()
-        self.cur.execute('CREATE TABLE IF NOT EXISTS downloads (name, date, link)')
+        self.cur.execute('CREATE TABLE IF NOT EXISTS downloads (name, date, link, path)')
         self.panel = wx.Panel(self)
         self.boxsizer = wx.BoxSizer(wx.VERTICAL)
         self.indeex = 0
-        self.ult = ULC.UltimateListCtrl(self.panel, agwStyle= wx.LC_REPORT)
+        self.ult = ULC.UltimateListCtrl(self.panel, agwStyle= ULC.ULC_REPORT | ULC.ULC_VRULES | ULC.ULC_HRULES | ULC.ULC_SINGLE_SEL | ULC.ULC_HAS_VARIABLE_ROW_HEIGHT)
         info = ULC.UltimateListItem()
         info._mask = wx.LIST_MASK_TEXT
         info._text = "Name"
@@ -190,25 +191,14 @@ class MyFrame(wx.Frame):
         self.showmenu()
         self.Bind(wx.EVT_MENU, self.magnet, self.frstentry)
         self.Bind(wx.EVT_LIST_ITEM_RIGHT_CLICK, self.OnRight)
-
+        self.db.close()
     def OnRight(self, event):
         popupmenu = wx.Menu()
-        Pause = popupmenu.Append(-1, "Pause")
-        Resume = popupmenu.Append(-1, "Resume")
+        PauseResume = popupmenu.Append(-1, "Pause/Resume")
         Delete = popupmenu.Append(-1, 'Delete With Files')
-        self.Bind(wx.EVT_MENU, self.OnPause, Pause)
+        self.Bind(wx.EVT_MENU, self.OnPause, PauseResume)
         self.Bind(wx.EVT_MENU, self.OnDelete, Delete)
-        self.Bind(wx.EVT_MENU, self.OnResume, Resume)
         self.ult.PopupMenu(popupmenu)
-    def OnResume(self, event):
-        self.db = sqlite3.connect('downloads.db', check_same_thread=False)
-        self.cur = self.db.cursor()
-        self.cur.execute('SELECT * FROM downloads')
-        self.all = self.cur.fetchall()
-        ind = self.ult.GetFirstSelected()
-        print('resuming')
-        print(self.all)
-        pub.sendMessage('resumetor', args=self.all[ind][0])
 
     def OnPause(self, event):
         self.db = sqlite3.connect('downloads.db', check_same_thread=False)
@@ -216,8 +206,6 @@ class MyFrame(wx.Frame):
         self.cur.execute('SELECT * FROM downloads')
         self.all = self.cur.fetchall()
         ind = self.ult.GetFirstSelected()
-        print('pausing')
-        print(self.all)
         pub.sendMessage('pausetor', args=self.all[ind][0])
     def OnDelete(self, event):
         self.db = sqlite3.connect('downloads.db', check_same_thread=False)
@@ -240,7 +228,7 @@ class MyFrame(wx.Frame):
         self.SetMenuBar(self.mainmenu)
 
     def magnet(self, event):
-        dilaog = magntdialog(None, title='show', size=(210,130))
+        dilaog = magntdialog(None, title='Add magnet', size=(560,130))
         dilaog.ShowModal()
         dilaog.Destroy()
 
@@ -250,13 +238,16 @@ class MyFrame(wx.Frame):
         self.cur.execute('SELECT oid,* FROM downloads')
         self.alldowns = self.cur.fetchall()
         for x,y in enumerate(self.alldowns):
-            if y[1] == message[7]:
-                self.ult.SetStringItem(self.alldowns[x][0] - 1, 1, str(round(message[0], 1)) + '%')
-                self.ult.SetStringItem(self.alldowns[x][0] - 1, 2, str(message[6]))
+            if y[1] == message[6]:
+                self.gawk = wx.Gauge(self.ult)
+                self.gawk.SetValue(int(message[0]))
+                self.ult.SetItemWindow(self.alldowns[x][0] - 1, 1, self.gawk, expand=True)
+                self.ult.SetStringItem(self.alldowns[x][0] - 1, 2, str(message[5]))
                 self.ult.SetStringItem(self.alldowns[x][0] - 1, 3, str(message[1]))
                 self.ult.SetStringItem(self.alldowns[x][0] - 1, 4, str(message[2]))
                 self.ult.SetStringItem(self.alldowns[x][0] - 1, 5, str(round(message[3], 1)) + 'MB')
-                self.ult.SetStringItem(self.alldowns[x][0] - 1, 6, str(message[5]) + 'MB')
+                self.ult.SetStringItem(self.alldowns[x][0] - 1, 6, str(message[4]) + 'MB')
+        self.db.close()
     def addtor(self, args):
         self.db =sqlite3.connect('downloads.db', check_same_thread=False)
         self.cur = self.db.cursor()
@@ -268,11 +259,12 @@ class MyFrame(wx.Frame):
         if args[0] in tmplist:
             print('torrent already in')
         else:
-            self.cur.execute('INSERT INTO downloads VALUES (:torname,:tordate,:link)',
+            self.cur.execute('INSERT INTO downloads VALUES (:torname,:tordate,:link, :path)',
             {
                 'torname': args[0],
                 'tordate': args[1],
-                'link': args[2]
+                'link': args[2],
+                'path': args[3]
             }
             )
             try:
@@ -287,7 +279,7 @@ class MyFrame(wx.Frame):
 class MyApp(wx.App):
     def __init__(self):
         super().__init__()
-        self.frame = MyFrame(parent=None, title='pyTorrent', size=(800, 350))
+        self.frame = MyFrame(parent=None, title='pyTorrent', size=(840, 350))
         self.frame.Show()
 
 s = lt.session()
