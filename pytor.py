@@ -99,7 +99,7 @@ class magntdialog(wx.Dialog):
         stbx = wx.StaticBox(self.panel,-1,'Submit Magnet Link')
         sttcbx = wx.StaticBoxSizer(stbx, wx.VERTICAL)
         self.entry = wx.TextCtrl(self.panel,size=(250,30))
-        self.entry2 = wx.TextCtrl(self.panel, size=(200, 30))
+        self.entry2 = wx.TextCtrl(self.panel, size=(200, 30), value='./downloads/')
         self.pathbutton = wx.Button(self.panel, -1, 'Select Path')
         self.magnetbutton = wx.Button(self.panel, -1, 'Submit')
         sttcbx.Add(self.entry, 0, wx.ALIGN_CENTER)
@@ -178,11 +178,15 @@ class MyFrame(wx.Frame):
 
         self.cur.execute('SELECT oid,* FROM downloads')
         self.alldowns = self.cur.fetchall()
-
+        self.allgauges = []
         if self.alldowns != []:
             for i in self.alldowns:
+                self.allgauges.append((i[1],wx.Gauge(self.ult)))
                 torthread(i)
                 self.ult.InsertStringItem(i[0], i[1])
+
+        for x, gaug in enumerate(self.allgauges):
+            self.ult.SetItemWindow(x, 1,  gaug[1], expand=True)
 
         self.boxsizer.Add(self.ult, 1, wx.EXPAND)
         self.panel.SetSizer(self.boxsizer)
@@ -207,6 +211,7 @@ class MyFrame(wx.Frame):
         self.all = self.cur.fetchall()
         ind = self.ult.GetFirstSelected()
         pub.sendMessage('pausetor', args=self.all[ind][0])
+        self.db.close()
     def OnDelete(self, event):
         self.db = sqlite3.connect('downloads.db', check_same_thread=False)
         self.cur = self.db.cursor()
@@ -239,9 +244,11 @@ class MyFrame(wx.Frame):
         self.alldowns = self.cur.fetchall()
         for x,y in enumerate(self.alldowns):
             if y[1] == message[6]:
-                self.gawk = wx.Gauge(self.ult)
-                self.gawk.SetValue(int(message[0]))
-                self.ult.SetItemWindow(self.alldowns[x][0] - 1, 1, self.gawk, expand=True)
+                for name,gaug in self.allgauges:
+                    if name == message[6]:
+                        gaug.SetValue(int(message[0]))
+
+                        print('changinvalu')
                 self.ult.SetStringItem(self.alldowns[x][0] - 1, 2, str(message[5]))
                 self.ult.SetStringItem(self.alldowns[x][0] - 1, 3, str(message[1]))
                 self.ult.SetStringItem(self.alldowns[x][0] - 1, 4, str(message[2]))
@@ -269,6 +276,9 @@ class MyFrame(wx.Frame):
             )
             try:
                 self.ult.InsertStringItem(self.alldowns[-1][0], args[0])
+                self.allgauges.append((args[0], wx.Gauge(self.ult)))
+                for x, gaug in enumerate(self.allgauges):
+                    self.ult.SetItemWindow(x, 1,  gaug[1], expand=True)
             except IndexError:
                 self.ult.InsertStringItem(0, args[0])
 
