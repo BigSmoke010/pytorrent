@@ -46,6 +46,8 @@ class torthread(threading.Thread):
         pub.sendMessage('add', args=[self.parseduri.name, datetime.datetime.now(), self._args[3], self._args[4]])
 
         while self.added.status().state != lt.torrent_status.seeding and not self.deleted:
+            if self.deleted:
+                self.added.pause()
             if self.paused and not self.resumed:
                 self.added.pause()
             if self.resumed and not self.paused:
@@ -55,11 +57,13 @@ class torthread(threading.Thread):
                 f.write(x)
             se = self.added.status()
             progress = se.progress * 100
-            time.sleep(5)
             pub.sendMessage('update', message=[progress,se.num_seeds,se.num_peers, se.download_rate / 1000000, se.upload_rate / 1000000, se.state,self.parseduri.name])
             tmplist.clear()
+            time.sleep(3)
 
         while self.added.status().state == lt.torrent_status.seeding and not self.deleted:
+            if self.deleted:
+                self.added.pause()
             if self.paused and not self.resumed:
                 self.added.pause()
             if self.resumed and not self.paused:
@@ -69,14 +73,14 @@ class torthread(threading.Thread):
                 f.write(x)
             se = self.added.status()
             progress = se.progress * 100
-            time.sleep(5)
             pub.sendMessage('update', message=[progress,se.num_seeds,se.num_peers, se.download_rate / 1000000, se.upload_rate / 1000000, se.state,self.parseduri.name])
             tmplist.clear()
+            time.sleep(3)
 
     def deletetorrent(self, args):
         if self.parseduri.name == args:
+            print('deeleteeeing')
             self.deleted = True
-            self.added.pause()
             try:
                 shutil.rmtree(self._args[4] + difflib.get_close_matches(self.parseduri.name, os.listdir('./downloads/'))[0])
             except NotADirectoryError:
@@ -121,6 +125,7 @@ class magntdialog(wx.Dialog):
     def setpath(self, event):
         filepath = wx.DirDialog(None, 'Select Folder', './downloads/', wx.DD_DEFAULT_STYLE)
         filepath.ShowModal()
+        filepath.Destroy()
         self.entry2.SetValue(filepath.GetPath())
 
 class MyFrame(wx.Frame):
@@ -132,7 +137,8 @@ class MyFrame(wx.Frame):
         self.panel = wx.Panel(self)
         self.boxsizer = wx.BoxSizer(wx.VERTICAL)
         self.indeex = 0
-        self.ult = ULC.UltimateListCtrl(self.panel, agwStyle= ULC.ULC_REPORT | ULC.ULC_VRULES | ULC.ULC_HRULES | ULC.ULC_SINGLE_SEL | ULC.ULC_HAS_VARIABLE_ROW_HEIGHT)
+
+        self.ult = ULC.UltimateListCtrl(self.panel, agwStyle= ULC.ULC_REPORT | ULC.ULC_HAS_VARIABLE_ROW_HEIGHT)
         info = ULC.UltimateListItem()
         info._mask = wx.LIST_MASK_TEXT
         info._text = "Name"
@@ -178,6 +184,8 @@ class MyFrame(wx.Frame):
 
         self.cur.execute('SELECT oid,* FROM downloads')
         self.alldowns = self.cur.fetchall()
+        self.cur.close()
+        self.db.close()
         self.allgauges = []
         if self.alldowns != []:
             for i in self.alldowns:
@@ -185,9 +193,7 @@ class MyFrame(wx.Frame):
                 torthread(i)
                 self.ult.InsertStringItem(i[0], i[1])
 
-        for x, gaug in enumerate(self.allgauges):
-            self.ult.SetItemWindow(x, 1,  gaug[1], expand=True)
-
+        self.updategauges()
         self.boxsizer.Add(self.ult, 1, wx.EXPAND)
         self.panel.SetSizer(self.boxsizer)
         pub.subscribe(self.updateprog, 'update')
@@ -195,7 +201,12 @@ class MyFrame(wx.Frame):
         self.showmenu()
         self.Bind(wx.EVT_MENU, self.magnet, self.frstentry)
         self.Bind(wx.EVT_LIST_ITEM_RIGHT_CLICK, self.OnRight)
-        self.db.close()
+    def updategauges(self):
+        for x, gaug in enumerate(self.allgauges):
+            try:
+                self.ult.SetItemWindow(x, 1,  gaug[1], expand=True)
+            except AttributeError:
+                pass
     def OnRight(self, event):
         popupmenu = wx.Menu()
         PauseResume = popupmenu.Append(-1, "Pause/Resume")
@@ -211,6 +222,7 @@ class MyFrame(wx.Frame):
         self.all = self.cur.fetchall()
         ind = self.ult.GetFirstSelected()
         pub.sendMessage('pausetor', args=self.all[ind][0])
+        self.cur.close()
         self.db.close()
     def OnDelete(self, event):
         self.db = sqlite3.connect('downloads.db', check_same_thread=False)
@@ -221,6 +233,7 @@ class MyFrame(wx.Frame):
         self.cur.execute('DELETE FROM downloads WHERE oid =' + str(ind + 1))
         self.ult.DeleteItem(ind)
         self.db.commit()
+        self.cur.close()
         self.db.close()
         pub.sendMessage('deletetor', args=self.all[ind][0])
 
@@ -247,13 +260,12 @@ class MyFrame(wx.Frame):
                 for name,gaug in self.allgauges:
                     if name == message[6]:
                         gaug.SetValue(int(message[0]))
-
-                        print('changinvalu')
                 self.ult.SetStringItem(self.alldowns[x][0] - 1, 2, str(message[5]))
                 self.ult.SetStringItem(self.alldowns[x][0] - 1, 3, str(message[1]))
                 self.ult.SetStringItem(self.alldowns[x][0] - 1, 4, str(message[2]))
                 self.ult.SetStringItem(self.alldowns[x][0] - 1, 5, str(round(message[3], 1)) + 'MB')
                 self.ult.SetStringItem(self.alldowns[x][0] - 1, 6, str(message[4]) + 'MB')
+        self.cur.close()
         self.db.close()
     def addtor(self, args):
         self.db =sqlite3.connect('downloads.db', check_same_thread=False)
@@ -277,8 +289,8 @@ class MyFrame(wx.Frame):
             try:
                 self.ult.InsertStringItem(self.alldowns[-1][0], args[0])
                 self.allgauges.append((args[0], wx.Gauge(self.ult)))
-                for x, gaug in enumerate(self.allgauges):
-                    self.ult.SetItemWindow(x, 1,  gaug[1], expand=True)
+                self.updategauges()
+
             except IndexError:
                 self.ult.InsertStringItem(0, args[0])
 
