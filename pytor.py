@@ -31,51 +31,24 @@ class torthread(threading.Thread):
         tmplist = []
         for im in self.alls:
             tmplist.append(im[0])
-        if self.parseduri.name in tmplist:
-            try:
-                with open('resumedata/' + self.parseduri.name, 'rb') as r:
-                    resumedata = lt.read_resume_data(r.read())
-                    resumedata.save_path = self._args[4]
-                    self.added = s.add_torrent(resumedata)
-            except FileNotFoundError:
-                self.parseduri.save_path = self._args[4]
-                self.added = s.add_torrent(self.parseduri)
         if self.parseduri.name not in tmplist:
             self.parseduri.save_path = self._args[4]
             self.added = s.add_torrent(self.parseduri)
-        pub.sendMessage('add', args=[self.parseduri.name, datetime.datetime.now(), self._args[3], self._args[4]])
+        pub.sendMessage('add', args=[self.parseduri.name, datetime.datetime.now(), self._args[3], self._args[4], 'no'])
 
-        while self.added.status().state != lt.torrent_status.seeding and not self.deleted:
+        while self.added.status() and not self.deleted:
             if self.deleted:
                 self.added.pause()
             if self.paused and not self.resumed:
                 self.added.pause()
             if self.resumed and not self.paused:
                 self.added.resume()
-            x = lt.write_resume_data_buf(lt.parse_magnet_uri(self._args[3]))
-            with open ('resumedata/' + self.parseduri.name, 'wb') as f:
-                f.write(x)
             se = self.added.status()
             progress = se.progress * 100
-            pub.sendMessage('update', message=[progress,se.num_seeds,se.num_peers, se.download_rate / 1000000, se.upload_rate / 1000000, se.state,self.parseduri.name])
+            pub.sendMessage('update', message=[progress,se.num_seeds,se.num_peers, se.download_rate / 1000000, se.upload_rate / 1000000, se.state,self.parseduri.name, se.total / 1000000, se.total_done / 1000000,])
             tmplist.clear()
-            time.sleep(3)
+            time.sleep(4)
 
-        while self.added.status().state == lt.torrent_status.seeding and not self.deleted:
-            if self.deleted:
-                self.added.pause()
-            if self.paused and not self.resumed:
-                self.added.pause()
-            if self.resumed and not self.paused:
-                self.added.resume()
-            x = lt.write_resume_data_buf(lt.parse_magnet_uri(self._args[3]))
-            with open ('resumedata/' + self.parseduri.name, 'wb') as f:
-                f.write(x)
-            se = self.added.status()
-            progress = se.progress * 100
-            pub.sendMessage('update', message=[progress,se.num_seeds,se.num_peers, se.download_rate / 1000000, se.upload_rate / 1000000, se.state,self.parseduri.name])
-            tmplist.clear()
-            time.sleep(3)
 
     def deletetorrent(self, args):
         if self.parseduri.name == args:
@@ -133,47 +106,47 @@ class MyFrame(wx.Frame):
         super().__init__(*args, **kw)
         self.db =sqlite3.connect('downloads.db', check_same_thread=False)
         self.cur = self.db.cursor()
-        self.cur.execute('CREATE TABLE IF NOT EXISTS downloads (name, date, link, path)')
+        self.cur.execute('CREATE TABLE IF NOT EXISTS downloads (name, date, link, path, paused)')
         self.panel = wx.Panel(self)
         self.boxsizer = wx.BoxSizer(wx.VERTICAL)
         self.indeex = 0
-
         self.ult = ULC.UltimateListCtrl(self.panel, agwStyle= ULC.ULC_REPORT | ULC.ULC_HAS_VARIABLE_ROW_HEIGHT)
         info = ULC.UltimateListItem()
         info._mask = wx.LIST_MASK_TEXT
         info._text = "Name"
         self.ult.InsertColumnInfo(0, info)
-
         info = ULC.UltimateListItem()
         info._mask = wx.LIST_MASK_TEXT
         info._text = "Progress"
         self.ult.InsertColumnInfo(1, info)
-
         info = ULC.UltimateListItem()
         info._mask = wx.LIST_MASK_TEXT
         info._text = "Status"
         self.ult.InsertColumnInfo(2, info)
-
         info = ULC.UltimateListItem()
         info._mask = wx.LIST_MASK_TEXT
         info._text = "Seeds"
         self.ult.InsertColumnInfo(3, info)
-
         info = ULC.UltimateListItem()
         info._mask = wx.LIST_MASK_TEXT
         info._text = "Peers"
         self.ult.InsertColumnInfo(4, info)
-
         info = ULC.UltimateListItem()
         info._mask = wx.LIST_MASK_TEXT
         info._text = "Download Speed"
         self.ult.InsertColumnInfo(5, info)
-
         info = ULC.UltimateListItem()
         info._mask = wx.LIST_MASK_TEXT
         info._text = "Upload Speed"
         self.ult.InsertColumnInfo(6, info)
-
+        info = ULC.UltimateListItem()
+        info._mask = wx.LIST_MASK_TEXT
+        info._text = "Total Download"
+        self.ult.InsertColumnInfo(7, info)
+        info = ULC.UltimateListItem()
+        info._mask = wx.LIST_MASK_TEXT
+        info._text = "Total Downloaded"
+        self.ult.InsertColumnInfo(8, info)
         self.ult.SetColumnWidth(0, 250)
         self.ult.SetColumnWidth(1, 100)
         self.ult.SetColumnWidth(2, 150)
@@ -181,7 +154,8 @@ class MyFrame(wx.Frame):
         self.ult.SetColumnWidth(4, 50)
         self.ult.SetColumnWidth(5, 120)
         self.ult.SetColumnWidth(6, 120)
-
+        self.ult.SetColumnWidth(7, 120)
+        self.ult.SetColumnWidth(8, 120)
         self.cur.execute('SELECT oid,* FROM downloads')
         self.alldowns = self.cur.fetchall()
         self.cur.close()
@@ -192,7 +166,6 @@ class MyFrame(wx.Frame):
                 self.allgauges.append((i[1],wx.Gauge(self.ult)))
                 torthread(i)
                 self.ult.InsertStringItem(i[0], i[1])
-
         self.updategauges()
         self.boxsizer.Add(self.ult, 1, wx.EXPAND)
         self.panel.SetSizer(self.boxsizer)
@@ -232,6 +205,7 @@ class MyFrame(wx.Frame):
         ind = self.ult.GetFirstSelected()
         self.cur.execute('DELETE FROM downloads WHERE oid =' + str(ind + 1))
         self.ult.DeleteItem(ind)
+        del self.allgauges[ind]
         self.db.commit()
         self.cur.close()
         self.db.close()
@@ -251,23 +225,24 @@ class MyFrame(wx.Frame):
         dilaog.Destroy()
 
     def updateprog(self,message):
-        self.db = sqlite3.connect('downloads.db', check_same_thread=False)
-        self.cur = self.db.cursor()
-        self.cur.execute('SELECT oid,* FROM downloads')
-        self.alldowns = self.cur.fetchall()
-        for x,y in enumerate(self.alldowns):
-            if y[1] == message[6]:
-                for name,gaug in self.allgauges:
-                    if name == message[6]:
-                        gaug.SetValue(int(message[0]))
-                self.ult.SetStringItem(self.alldowns[x][0] - 1, 2, str(message[5]))
-                self.ult.SetStringItem(self.alldowns[x][0] - 1, 3, str(message[1]))
-                self.ult.SetStringItem(self.alldowns[x][0] - 1, 4, str(message[2]))
-                self.ult.SetStringItem(self.alldowns[x][0] - 1, 5, str(round(message[3], 1)) + 'MB')
-                self.ult.SetStringItem(self.alldowns[x][0] - 1, 6, str(message[4]) + 'MB')
-        self.cur.close()
-        self.db.close()
-    def addtor(self, args):
+        try :
+            lock.acquire(True)
+            for x,y in enumerate(self.alldowns):
+                if y[1] == message[6]:
+                    for name,gaug in self.allgauges:
+                        if name == message[6]:
+                            gaug.SetValue(int(message[0]))
+                    self.ult.SetStringItem(self.alldowns[x][0] - 1, 2, str(message[5]))
+                    self.ult.SetStringItem(self.alldowns[x][0] - 1, 3, str(message[1]))
+                    self.ult.SetStringItem(self.alldowns[x][0] - 1, 4, str(message[2]))
+                    self.ult.SetStringItem(self.alldowns[x][0] - 1, 5, str(round(message[3], 1)) + 'MB')
+                    self.ult.SetStringItem(self.alldowns[x][0] - 1, 6, str(message[4]) + 'MB')
+                    self.ult.SetStringItem(self.alldowns[x][0] - 1, 7, str(round(message[7], 2)) + 'MB')
+                    self.ult.SetStringItem(self.alldowns[x][0] - 1, 8, str(round(message[8], 2)) + 'MB')
+
+        finally:
+            lock.release()
+    def addtor(self,args):
         self.db =sqlite3.connect('downloads.db', check_same_thread=False)
         self.cur = self.db.cursor()
         self.cur.execute('SELECT oid,* FROM downloads')
@@ -278,12 +253,13 @@ class MyFrame(wx.Frame):
         if args[0] in tmplist:
             print('torrent already in')
         else:
-            self.cur.execute('INSERT INTO downloads VALUES (:torname,:tordate,:link, :path)',
+            self.cur.execute('INSERT INTO downloads VALUES (:torname,:tordate,:link, :path, :ispaused)',
             {
                 'torname': args[0],
                 'tordate': args[1],
                 'link': args[2],
-                'path': args[3]
+                'path': args[3],
+                'ispaused': args[4]
             }
             )
             try:
@@ -295,6 +271,8 @@ class MyFrame(wx.Frame):
                 self.ult.InsertStringItem(0, args[0])
 
         self.db.commit()
+        self.cur.execute('SELECT oid,* FROM downloads')
+        self.alldowns = self.cur.fetchall()
         self.cur.close()
         self.db.close()
 
@@ -305,5 +283,6 @@ class MyApp(wx.App):
         self.frame.Show()
 
 s = lt.session()
+lock = threading.Lock()
 app = MyApp()
 app.MainLoop()
