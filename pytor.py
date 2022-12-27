@@ -28,14 +28,9 @@ class torthread(threading.Thread):
         self.db.close()
         self.parseduri = lt.parse_magnet_uri(self._args[3])
         self.parseduri.save_path = self._args[4]
-        tmplist = []
-        for im in self.alls:
-            tmplist.append(im[0])
-        if self.parseduri.name not in tmplist:
-            self.parseduri.save_path = self._args[4]
-            self.added = s.add_torrent(self.parseduri)
+        self.parseduri.save_path = self._args[4]
+        self.added = s.add_torrent(self.parseduri)
         pub.sendMessage('add', args=[self.parseduri.name, datetime.datetime.now(), self._args[3], self._args[4], 'no'])
-
         while self.added.status() and not self.deleted:
             if self.deleted:
                 self.added.pause()
@@ -46,7 +41,6 @@ class torthread(threading.Thread):
             se = self.added.status()
             progress = se.progress * 100
             pub.sendMessage('update', message=[progress,se.num_seeds,se.num_peers, se.download_rate / 1000000, se.upload_rate / 1000000, se.state,self.parseduri.name, se.total / 1000000, se.total_done / 1000000,])
-            tmplist.clear()
             time.sleep(4)
 
 
@@ -279,7 +273,7 @@ class MyFrame(wx.Frame):
 class MyApp(wx.App):
     def __init__(self):
         super().__init__()
-        self.frame = MyFrame(parent=None, title='pyTorrent', size=(840, 350))
+        self.frame = MyFrame(parent=None, title='pyTorrent', size=(1100, 350))
         self.frame.Show()
 
 s = lt.session()
