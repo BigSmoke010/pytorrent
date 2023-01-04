@@ -25,23 +25,27 @@ class torthread(threading.Thread):
         self.resumed = True
         self.deleted = False
         self.alls = self.curs.fetchall()
+        self.curs.close()
         self.db.close()
         self.parseduri = lt.parse_magnet_uri(self._args[3])
         self.parseduri.save_path = self._args[4]
         self.parseduri.save_path = self._args[4]
         self.added = s.add_torrent(self.parseduri)
         pub.sendMessage('add', args=[self.parseduri.name, datetime.datetime.now(), self._args[3], self._args[4], 'no'])
+        se = self.added.status()
+
         while self.added.status() and not self.deleted:
+            self.se = self.added.status()
             if self.deleted:
                 self.added.pause()
             if self.paused and not self.resumed:
+                self.ispaused = 'yes'
                 self.added.pause()
             if self.resumed and not self.paused:
+                self.ispaused = 'no'
                 self.added.resume()
-            se = self.added.status()
-            progress = se.progress * 100
-            pub.sendMessage('update', message=[progress,se.num_seeds,se.num_peers, se.download_rate / 1000000, se.upload_rate / 1000000, se.state,self.parseduri.name, se.total / 1000000, se.total_done / 1000000,])
-            time.sleep(4)
+            pub.sendMessage('update', message=[self.se.progress * 100 ,self.se.num_seeds, self.se.num_peers, self.se.download_rate / 1000000, self.se.upload_rate / 1000000, self.se.state,self.parseduri.name, self.se.total / 1000000, self.se.total_done / 1000000, self.ispaused])
+            time.sleep(5)
 
 
     def deletetorrent(self, args):
@@ -157,9 +161,11 @@ class MyFrame(wx.Frame):
         self.allgauges = []
         if self.alldowns != []:
             for i in self.alldowns:
-                self.allgauges.append((i[1],wx.Gauge(self.ult)))
-                torthread(i)
-                self.ult.InsertStringItem(i[0], i[1])
+                if i[-1] != 'yes':
+                    self.allgauges.append((i[1],wx.Gauge(self.ult)))
+                    torthread(i)
+                    self.ult.InsertStringItem(i[0], i[1])
+                    time.sleep(1)
         self.updategauges()
         self.boxsizer.Add(self.ult, 1, wx.EXPAND)
         self.panel.SetSizer(self.boxsizer)
@@ -199,7 +205,9 @@ class MyFrame(wx.Frame):
         ind = self.ult.GetFirstSelected()
         self.cur.execute('DELETE FROM downloads WHERE oid =' + str(ind + 1))
         self.ult.DeleteItem(ind)
+        print(self.allgauges)
         del self.allgauges[ind]
+        print(self.allgauges)
         self.db.commit()
         self.cur.close()
         self.db.close()
