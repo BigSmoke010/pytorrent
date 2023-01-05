@@ -27,12 +27,22 @@ class torthread(threading.Thread):
         self.alls = self.curs.fetchall()
         self.curs.close()
         self.db.close()
+        tmplist = []
         self.parseduri = lt.parse_magnet_uri(self._args[3])
         self.parseduri.save_path = self._args[4]
-        self.parseduri.save_path = self._args[4]
-        self.added = s.add_torrent(self.parseduri)
-        pub.sendMessage('add', args=[self.parseduri.name, datetime.datetime.now(), self._args[3], self._args[4], 'no'])
-        se = self.added.status()
+        for i in self.alls:
+            tmplist.append(i[0])
+        if self.parseduri.name in tmplist:
+            try :
+                with open('resumedata/' + self.parseduri.name, 'rb') as r:
+                    self.rsumedata = lt.read_resume_data(r.read()) 
+                    self.rsumedata.save_path = self._args[4] 
+                    self.added = s.add_torrent(self.rsumedata)
+            except FileNotFoundError:
+                self.added = s.add_torrent(self.parseduri)
+        else:
+            self.added = s.add_torrent(self.parseduri)
+            pub.sendMessage('add', args=[self.parseduri.name, datetime.datetime.now(), self._args[3], self._args[4], 'no'])
 
         while self.added.status() and not self.deleted:
             self.se = self.added.status()
@@ -44,8 +54,10 @@ class torthread(threading.Thread):
             if self.resumed and not self.paused:
                 self.ispaused = 'no'
                 self.added.resume()
+            with open ('resumedata/' + self.parseduri.name, 'wb') as f:
+                f.write(lt.write_resume_data_buf(lt.parse_magnet_uri(self._args[3])))
             pub.sendMessage('update', message=[self.se.progress * 100 ,self.se.num_seeds, self.se.num_peers, self.se.download_rate / 1000000, self.se.upload_rate / 1000000, self.se.state,self.parseduri.name, self.se.total / 1000000, self.se.total_done / 1000000, self.ispaused])
-            time.sleep(5)
+            time.sleep(3)
 
 
     def deletetorrent(self, args):
