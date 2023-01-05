@@ -24,6 +24,11 @@ class torthread(threading.Thread):
         self.paused = False
         self.resumed = True
         self.deleted = False
+        print(self._args)
+        if self._args[5] == 'yes':
+            self.paused = True
+            print('YES')
+            self.resumed = False
         self.alls = self.curs.fetchall()
         self.curs.close()
         self.db.close()
@@ -49,16 +54,15 @@ class torthread(threading.Thread):
             if self.deleted:
                 self.added.pause()
             if self.paused and not self.resumed:
-                self.ispaused = 'yes'
+                print('we pasued ')
                 self.added.pause()
             if self.resumed and not self.paused:
-                self.ispaused = 'no'
+                print('we resumin')
                 self.added.resume()
             with open ('resumedata/' + self.parseduri.name.replace("/", "."), 'wb+') as f:
                 f.write(lt.write_resume_data_buf(lt.parse_magnet_uri(self._args[3])))
-            pub.sendMessage('update', message=[self.se.progress * 100 ,self.se.num_seeds, self.se.num_peers, self.se.download_rate / 1000000, self.se.upload_rate / 1000000, self.se.state,self.parseduri.name, self.se.total / 1000000, self.se.total_done / 1000000, self.ispaused])
+            pub.sendMessage('update', message=[self.se.progress * 100 ,self.se.num_seeds, self.se.num_peers, self.se.download_rate / 1000000, self.se.upload_rate / 1000000, self.se.state,self.parseduri.name, self.se.total / 1000000, self.se.total_done / 1000000, ])
             time.sleep(3)
-
 
     def deletetorrent(self, args):
         if self.parseduri.name == args:
@@ -173,10 +177,9 @@ class MyFrame(wx.Frame):
         self.allgauges = []
         if self.alldowns != []:
             for i in self.alldowns:
-                if i[-1] != 'yes':
-                    self.allgauges.append((i[1],wx.Gauge(self.ult)))
-                    torthread(i)
-                    self.ult.InsertStringItem(i[0], i[1])
+                self.allgauges.append((i[1],wx.Gauge(self.ult)))
+                torthread(i)
+                self.ult.InsertStringItem(i[0], i[1])
         self.updategauges()
         self.boxsizer.Add(self.ult, 1, wx.EXPAND)
         self.panel.SetSizer(self.boxsizer)
@@ -206,6 +209,18 @@ class MyFrame(wx.Frame):
         self.all = self.cur.fetchall()
         ind = self.ult.GetFirstSelected()
         pub.sendMessage('pausetor', args=self.all[ind][0])
+        if self.all[ind][-1] == 'yes': 
+            self.cur.execute('UPDATE downloads SET paused = :nai WHERE oid =' + str(ind + 1),
+                             {
+                                'nai' : 'no'
+                             })
+        else:
+            self.cur.execute('UPDATE downloads SET paused = :nai WHERE oid =' + str(ind + 1),
+                             {
+                                'nai' : 'yes'
+                             })
+
+        self.db.commit()
         self.cur.close()
         self.db.close()
     def OnDelete(self, event):
@@ -252,7 +267,6 @@ class MyFrame(wx.Frame):
                     self.ult.SetStringItem(self.alldowns[x][0] - 1, 6, str(message[4]) + 'MB')
                     self.ult.SetStringItem(self.alldowns[x][0] - 1, 7, str(round(message[7], 2)) + 'MB')
                     self.ult.SetStringItem(self.alldowns[x][0] - 1, 8, str(round(message[8], 2)) + 'MB')
-
         finally:
             lock.release()
     def addtor(self,args):
