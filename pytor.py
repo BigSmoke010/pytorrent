@@ -34,7 +34,7 @@ class torthread(threading.Thread):
             tmplist.append(i[0])
         if self.parseduri.name in tmplist:
             try :
-                with open('resumedata/' + self.parseduri.name, 'rb') as r:
+                with open('resumedata/' + self.parseduri.name.replace("/", "."), 'rb') as r:
                     self.rsumedata = lt.read_resume_data(r.read()) 
                     self.rsumedata.save_path = self._args[4] 
                     self.added = s.add_torrent(self.rsumedata)
@@ -54,7 +54,7 @@ class torthread(threading.Thread):
             if self.resumed and not self.paused:
                 self.ispaused = 'no'
                 self.added.resume()
-            with open ('resumedata/' + self.parseduri.name, 'wb') as f:
+            with open ('resumedata/' + self.parseduri.name.replace("/", "."), 'wb+') as f:
                 f.write(lt.write_resume_data_buf(lt.parse_magnet_uri(self._args[3])))
             pub.sendMessage('update', message=[self.se.progress * 100 ,self.se.num_seeds, self.se.num_peers, self.se.download_rate / 1000000, self.se.upload_rate / 1000000, self.se.state,self.parseduri.name, self.se.total / 1000000, self.se.total_done / 1000000, self.ispaused])
             time.sleep(3)
@@ -65,11 +65,11 @@ class torthread(threading.Thread):
             print('deeleteeeing')
             self.deleted = True
             try:
-                shutil.rmtree(self._args[4] + difflib.get_close_matches(self.parseduri.name, os.listdir('./downloads/'))[0])
+                shutil.rmtree(self._args[4] + difflib.get_close_matches(self.parseduri.name.replace("/", "."), os.listdir('./downloads/'))[0])
             except NotADirectoryError:
-                os.remove(self._args[4] + difflib.get_close_matches(self.parseduri.name, os.listdir('./downloads/'))[0])
+                os.remove(self._args[4] + difflib.get_close_matches(self.parseduri.name.replace("/", "."), os.listdir('./downloads/'))[0])
             time.sleep(3)
-            os.remove('resumedata/' + difflib.get_close_matches(self.parseduri.name, os.listdir('./resumedata/'))[0])
+            os.remove('resumedata/' + difflib.get_close_matches(self.parseduri.name.replace("/", "."), os.listdir('./resumedata/'))[0])
 
     def pausetorrent(self, args):
         if self.parseduri.name == args:
@@ -177,7 +177,6 @@ class MyFrame(wx.Frame):
                     self.allgauges.append((i[1],wx.Gauge(self.ult)))
                     torthread(i)
                     self.ult.InsertStringItem(i[0], i[1])
-                    time.sleep(1)
         self.updategauges()
         self.boxsizer.Add(self.ult, 1, wx.EXPAND)
         self.panel.SetSizer(self.boxsizer)
