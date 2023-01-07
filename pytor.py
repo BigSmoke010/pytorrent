@@ -16,7 +16,6 @@ class torthread(threading.Thread):
         pub.subscribe(self.deletetorrent, 'deletetor')
         pub.subscribe(self.pausetorrent, 'pausetor')
         self.start()
-
     def run(self):
         self.db = sqlite3.connect('downloads.db', check_same_thread=False)
         self.curs = self.db.cursor()
@@ -24,11 +23,12 @@ class torthread(threading.Thread):
         self.paused = False
         self.resumed = True
         self.deleted = False
-        print(self._args)
-        if self._args[5] == 'yes':
-            self.paused = True
-            print('YES')
-            self.resumed = False
+        try:
+            if self._args[5] == 'yes':
+                self.paused = True
+                self.resumed = False
+        except IndexError:
+            pass
         self.alls = self.curs.fetchall()
         self.curs.close()
         self.db.close()
@@ -39,8 +39,8 @@ class torthread(threading.Thread):
             tmplist.append(i[0])
         if self.parseduri.name in tmplist:
             try :
-                with open('resumedata/' + self.parseduri.name.replace("/", "."), 'rb') as r:
-                    self.rsumedata = lt.read_resume_data(r.read()) 
+                with open('resumedata/' + self.parseduri.name.replace("/", "."), 'rb') as self.r:
+                    self.rsumedata = lt.read_resume_data(self.r.read()) 
                     self.rsumedata.save_path = self._args[4] 
                     self.added = s.add_torrent(self.rsumedata)
             except FileNotFoundError:
@@ -48,32 +48,25 @@ class torthread(threading.Thread):
         else:
             self.added = s.add_torrent(self.parseduri)
             pub.sendMessage('add', args=[self.parseduri.name, datetime.datetime.now(), self._args[3], self._args[4], 'no'])
-
-        while self.added.status() and not self.deleted:
-            self.se = self.added.status()
-            if self.deleted:
-                self.added.pause()
-            if self.paused and not self.resumed:
-                print('we pasued ')
-                self.added.pause()
-            if self.resumed and not self.paused:
-                print('we resumin')
-                self.added.resume()
-            with open ('resumedata/' + self.parseduri.name.replace("/", "."), 'wb+') as f:
-                f.write(lt.write_resume_data_buf(lt.parse_magnet_uri(self._args[3])))
-            pub.sendMessage('update', message=[self.se.progress * 100 ,self.se.num_seeds, self.se.num_peers, self.se.download_rate / 1000000, self.se.upload_rate / 1000000, self.se.state,self.parseduri.name, self.se.total / 1000000, self.se.total_done / 1000000, ])
-            time.sleep(3)
+        try:
+            while self.added.status() and not self.deleted:
+                self.se = self.added.status()
+                if self.deleted:
+                    self.added.pause()
+                if self.paused and not self.resumed:
+                    self.added.pause()
+                if self.resumed and not self.paused:
+                    self.added.resume()
+                pub.sendMessage('update', message=[self.se.progress * 100 ,self.se.num_seeds, self.se.num_peers, self.se.download_rate / 1000000, self.se.upload_rate / 1000000, self.se.state,self.parseduri.name, self.se.total / 1000000, self.se.total_done / 1000000, ])
+                time.sleep(3)
+        except Exception:
+            pass
 
     def deletetorrent(self, args):
         if self.parseduri.name == args:
-            print('deeleteeeing')
             self.deleted = True
-            try:
-                shutil.rmtree(self._args[4] + difflib.get_close_matches(self.parseduri.name.replace("/", "."), os.listdir('./downloads/'))[0])
-            except NotADirectoryError:
-                os.remove(self._args[4] + difflib.get_close_matches(self.parseduri.name.replace("/", "."), os.listdir('./downloads/'))[0])
-            time.sleep(3)
-            os.remove('resumedata/' + difflib.get_close_matches(self.parseduri.name.replace("/", "."), os.listdir('./resumedata/'))[0])
+            s.remove_torrent(self.added)
+            os.remove('resumedata/' + difflib.get_close_matches(self.parseduri.name, os.listdir('./resumedata/'))[0].replace("/","."))
 
     def pausetorrent(self, args):
         if self.parseduri.name == args:
@@ -120,6 +113,7 @@ class MyFrame(wx.Frame):
         super().__init__(*args, **kw)
         self.db =sqlite3.connect('downloads.db', check_same_thread=False)
         self.cur = self.db.cursor()
+        self.db.commit()
         self.cur.execute('CREATE TABLE IF NOT EXISTS downloads (name, date, link, path, paused)')
         self.panel = wx.Panel(self)
         self.boxsizer = wx.BoxSizer(wx.VERTICAL)
@@ -224,20 +218,22 @@ class MyFrame(wx.Frame):
         self.cur.close()
         self.db.close()
     def OnDelete(self, event):
+        self.ind = self.ult.GetFirstSelected()
+        print(self.ind)
         self.db = sqlite3.connect('downloads.db', check_same_thread=False)
         self.cur = self.db.cursor()
-        self.cur.execute('SELECT * FROM downloads')
-        self.all = self.cur.fetchall()
-        ind = self.ult.GetFirstSelected()
-        self.cur.execute('DELETE FROM downloads WHERE oid =' + str(ind + 1))
-        self.ult.DeleteItem(ind)
-        print(self.allgauges)
-        del self.allgauges[ind]
-        print(self.allgauges)
+        self.cur.execute('SELECT oid,* FROM downloads')
+        self.alldowns = self.cur.fetchall()
+        pub.sendMessage('deletetor', args=self.alldowns[self.ind][1])
+        self.cur.execute('DELETE FROM downloads WHERE oid =' + str(self.ind + 1))
+        self.cur.execute('UPDATE downloads SET oid = oid - 1')
+        self.cur.execute('SELECT oid,* FROM downloads')
+        self.alldowns = self.cur.fetchall()
+        self.ult.DeleteItem(self.ind)
+        del self.allgauges[self.ind] 
         self.db.commit()
         self.cur.close()
         self.db.close()
-        pub.sendMessage('deletetor', args=self.all[ind][0])
 
     def showmenu(self):
         self.frstmenu = wx.Menu()
@@ -255,18 +251,22 @@ class MyFrame(wx.Frame):
     def updateprog(self,message):
         try :
             lock.acquire(True)
+            print(self.alldowns)
             for x,y in enumerate(self.alldowns):
                 if y[1] == message[6]:
                     for name,gaug in self.allgauges:
                         if name == message[6]:
                             gaug.SetValue(int(message[0]))
-                    self.ult.SetStringItem(self.alldowns[x][0] - 1, 2, str(message[5]))
-                    self.ult.SetStringItem(self.alldowns[x][0] - 1, 3, str(message[1]))
-                    self.ult.SetStringItem(self.alldowns[x][0] - 1, 4, str(message[2]))
-                    self.ult.SetStringItem(self.alldowns[x][0] - 1, 5, str(round(message[3], 1)) + 'MB')
-                    self.ult.SetStringItem(self.alldowns[x][0] - 1, 6, str(message[4]) + 'MB')
-                    self.ult.SetStringItem(self.alldowns[x][0] - 1, 7, str(round(message[7], 2)) + 'MB')
-                    self.ult.SetStringItem(self.alldowns[x][0] - 1, 8, str(round(message[8], 2)) + 'MB')
+                    try:
+                        self.ult.SetStringItem(x, 2, str(message[5]))
+                        self.ult.SetStringItem(x, 3, str(message[1]))
+                        self.ult.SetStringItem(x, 4, str(message[2]))
+                        self.ult.SetStringItem(x, 5, str(round(message[3], 1)) + 'MB')
+                        self.ult.SetStringItem(x, 6, str(message[4]) + 'MB')
+                        self.ult.SetStringItem(x, 7, str(round(message[7], 2)) + 'MB')
+                        self.ult.SetStringItem(x, 8, str(round(message[8], 2)) + 'MB')
+                    except Exception:
+                        pass
         finally:
             lock.release()
     def addtor(self,args):
@@ -276,7 +276,7 @@ class MyFrame(wx.Frame):
         self.alldowns = self.cur.fetchall()
         tmplist = []
         for im in self.alldowns:
-            tmplist.append(im[1])
+            tmplist.append(im[0])
         if args[0] in tmplist:
             print('torrent already in')
         else:
@@ -293,7 +293,6 @@ class MyFrame(wx.Frame):
                 self.ult.InsertStringItem(self.alldowns[-1][0], args[0])
                 self.allgauges.append((args[0], wx.Gauge(self.ult)))
                 self.updategauges()
-
             except IndexError:
                 self.ult.InsertStringItem(0, args[0])
 
