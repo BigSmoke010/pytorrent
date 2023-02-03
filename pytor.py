@@ -11,13 +11,13 @@ import shutil
 import difflib
 
 class torthread(threading.Thread):
-    def __init__(self, args):
-        super().__init__(args=args)
+    def __init__(self, args, win):
+        super().__init__(args=args, kwargs=win )
         pub.subscribe(self.deletetorrent, 'deletetor')
         pub.subscribe(self.pausetorrent, 'pausetor')
         self.start()
     def run(self):
-        self.db = sqlite3.connect('downloads.db', check_same_thread=False)
+        self.db = sqlite3.connect('downloads.db')
         self.curs = self.db.cursor()
         self.curs.execute('SELECT * FROM downloads')
         self.paused = False
@@ -48,25 +48,28 @@ class torthread(threading.Thread):
         else:
             self.added = s.add_torrent(self.parseduri)
             pub.sendMessage('add', args=[self.parseduri.name, datetime.datetime.now(), self._args[3], self._args[4], 'no'])
-        try:
-            while self.added.status() and not self.deleted:
-                self.se = self.added.status()
-                if self.deleted:
-                    self.added.pause()
-                if self.paused and not self.resumed:
-                    self.added.pause()
-                if self.resumed and not self.paused:
-                    self.added.resume()
-                pub.sendMessage('update', message=[self.se.progress * 100 ,self.se.num_seeds, self.se.num_peers, self.se.download_rate / 1000000, self.se.upload_rate / 1000000, self.se.state,self.parseduri.name, self.se.total / 1000000, self.se.total_done / 1000000, ])
-                time.sleep(3)
-        except Exception:
-            pass
+        while self.added.status() and not self.deleted:
+            self.se = self.added.status()
+            if self.deleted:
+                self.added.pause()
+            if self.paused and not self.resumed:
+                self.added.pause()
+            if self.resumed and not self.paused:
+                self.added.resume()
+            wx.PostEvent(self._kwargs, ResultEvent([self.se.progress * 100 ,self.se.num_seeds, self.se.num_peers, self.se.download_rate / 1000000, self.se.upload_rate / 1000000, self.se.state,self.parseduri.name, self.se.total / 1000000, self.se.total_done / 1000000]))
+            time.sleep(5)
+        self._stop_event.set()
 
     def deletetorrent(self, args):
         if self.parseduri.name == args:
-            self.deleted = True
             s.remove_torrent(self.added)
             os.remove('resumedata/' + difflib.get_close_matches(self.parseduri.name, os.listdir('./resumedata/'))[0].replace("/","."))
+            self.deleted = True
+            try:
+                shutil.rmtree(self._args[4] + difflib.get_close_matches(self.parseduri.name, os.listdir('./downloads/'))[0])
+            except NotADirectoryError:
+                os.remove(self._args[4] + difflib.get_close_matches(self.parseduri.name, os.listdir('./downloads/'))[0])
+            self._stop_event.set()
 
     def pausetorrent(self, args):
         if self.parseduri.name == args:
@@ -99,7 +102,7 @@ class magntdialog(wx.Dialog):
         self.panel.Bind(wx.EVT_BUTTON, self.setpath, self.pathbutton)
 
     def getmagnet(self, event):
-        torthread([None, None, None,self.entry.GetValue(), self.entry2.GetValue()])
+        pub.sendMessage('addfromdiag', x=[None, None, None,self.entry.GetValue(), self.entry2.GetValue()])
         magntdialog.Destroy(self)
 
     def setpath(self, event):
@@ -108,10 +111,18 @@ class magntdialog(wx.Dialog):
         filepath.Destroy()
         self.entry2.SetValue(filepath.GetPath())
 
+class ResultEvent(wx.PyEvent):
+    """Simple event to carry arbitrary result data."""
+    def __init__(self, data):
+        """Init Result Event."""
+        wx.PyEvent.__init__(self)
+        self.SetEventType(-1)
+        self.data = data
+
 class MyFrame(wx.Frame):
     def __init__(self, *args, **kw):
         super().__init__(*args, **kw)
-        self.db =sqlite3.connect('downloads.db', check_same_thread=False)
+        self.db =sqlite3.connect('downloads.db')
         self.cur = self.db.cursor()
         self.db.commit()
         self.cur.execute('CREATE TABLE IF NOT EXISTS downloads (name, date, link, path, paused)')
@@ -163,31 +174,27 @@ class MyFrame(wx.Frame):
         self.ult.SetColumnWidth(5, 120)
         self.ult.SetColumnWidth(6, 120)
         self.ult.SetColumnWidth(7, 120)
-        self.ult.SetColumnWidth(8, 120)
+        self.ult.SetColumnWidth(8, 150)
         self.cur.execute('SELECT oid,* FROM downloads')
         self.alldowns = self.cur.fetchall()
         self.cur.close()
         self.db.close()
-        self.allgauges = []
-        if self.alldowns != []:
-            for i in self.alldowns:
-                self.allgauges.append((i[1],wx.Gauge(self.ult)))
-                torthread(i)
-                self.ult.InsertStringItem(i[0], i[1])
-        self.updategauges()
+        for i in self.alldowns:
+            torthread(i, self)
+            self.ult.InsertStringItem(i[0], i[1])
         self.boxsizer.Add(self.ult, 1, wx.EXPAND)
         self.panel.SetSizer(self.boxsizer)
         pub.subscribe(self.updateprog, 'update')
         pub.subscribe(self.addtor, 'add')
+        pub.subscribe(self.addfrmdiag, 'addfromdiag')
+        self.EVT_RESULT(self, self.updateprog)
         self.showmenu()
         self.Bind(wx.EVT_MENU, self.magnet, self.frstentry)
         self.Bind(wx.EVT_LIST_ITEM_RIGHT_CLICK, self.OnRight)
-    def updategauges(self):
-        for x, gaug in enumerate(self.allgauges):
-            try:
-                self.ult.SetItemWindow(x, 1,  gaug[1], expand=True)
-            except AttributeError:
-                pass
+
+    def EVT_RESULT(self, win, func):
+        """Define Result Event."""
+        win.Connect(-1, -1, -1, func)
     def OnRight(self, event):
         popupmenu = wx.Menu()
         PauseResume = popupmenu.Append(-1, "Pause/Resume")
@@ -197,7 +204,7 @@ class MyFrame(wx.Frame):
         self.ult.PopupMenu(popupmenu)
 
     def OnPause(self, event):
-        self.db = sqlite3.connect('downloads.db', check_same_thread=False)
+        self.db = sqlite3.connect('downloads.db') 
         self.cur = self.db.cursor()
         self.cur.execute('SELECT * FROM downloads')
         self.all = self.cur.fetchall()
@@ -217,10 +224,10 @@ class MyFrame(wx.Frame):
         self.db.commit()
         self.cur.close()
         self.db.close()
+
     def OnDelete(self, event):
         self.ind = self.ult.GetFirstSelected()
-        print(self.ind)
-        self.db = sqlite3.connect('downloads.db', check_same_thread=False)
+        self.db = sqlite3.connect('downloads.db')
         self.cur = self.db.cursor()
         self.cur.execute('SELECT oid,* FROM downloads')
         self.alldowns = self.cur.fetchall()
@@ -230,7 +237,6 @@ class MyFrame(wx.Frame):
         self.cur.execute('SELECT oid,* FROM downloads')
         self.alldowns = self.cur.fetchall()
         self.ult.DeleteItem(self.ind)
-        del self.allgauges[self.ind] 
         self.db.commit()
         self.cur.close()
         self.db.close()
@@ -248,29 +254,19 @@ class MyFrame(wx.Frame):
         dilaog.ShowModal()
         dilaog.Destroy()
 
-    def updateprog(self,message):
-        try :
-            lock.acquire(True)
-            print(self.alldowns)
-            for x,y in enumerate(self.alldowns):
-                if y[1] == message[6]:
-                    for name,gaug in self.allgauges:
-                        if name == message[6]:
-                            gaug.SetValue(int(message[0]))
-                    try:
-                        self.ult.SetStringItem(x, 2, str(message[5]))
-                        self.ult.SetStringItem(x, 3, str(message[1]))
-                        self.ult.SetStringItem(x, 4, str(message[2]))
-                        self.ult.SetStringItem(x, 5, str(round(message[3], 1)) + 'MB')
-                        self.ult.SetStringItem(x, 6, str(message[4]) + 'MB')
-                        self.ult.SetStringItem(x, 7, str(round(message[7], 2)) + 'MB')
-                        self.ult.SetStringItem(x, 8, str(round(message[8], 2)) + 'MB')
-                    except Exception:
-                        pass
-        finally:
-            lock.release()
+    def updateprog(self, message):
+        for x,y in enumerate(self.alldowns):
+            if y[1] == message.data[6]:
+                self.ult.SetStringItem(x, 1, str(message.data[0]))
+                self.ult.SetStringItem(x, 2, str(message.data[5]))
+                self.ult.SetStringItem(x, 3, str(message.data[1]))
+                self.ult.SetStringItem(x, 4, str(message.data[2]))
+                self.ult.SetStringItem(x, 5, str(round(message.data[3], 1)) + 'MB')
+                self.ult.SetStringItem(x, 6, str(message.data[4]) + 'MB')
+                self.ult.SetStringItem(x, 7, str(round(message.data[7], 2)) + 'MB')
+                self.ult.SetStringItem(x, 8, str(round(message.data[8], 2)) + 'MB')
     def addtor(self,args):
-        self.db =sqlite3.connect('downloads.db', check_same_thread=False)
+        self.db =sqlite3.connect('downloads.db')
         self.cur = self.db.cursor()
         self.cur.execute('SELECT oid,* FROM downloads')
         self.alldowns = self.cur.fetchall()
@@ -291,8 +287,6 @@ class MyFrame(wx.Frame):
             )
             try:
                 self.ult.InsertStringItem(self.alldowns[-1][0], args[0])
-                self.allgauges.append((args[0], wx.Gauge(self.ult)))
-                self.updategauges()
             except IndexError:
                 self.ult.InsertStringItem(0, args[0])
 
@@ -301,14 +295,16 @@ class MyFrame(wx.Frame):
         self.alldowns = self.cur.fetchall()
         self.cur.close()
         self.db.close()
+    def addfrmdiag(self, x):
+        torthread(x, self)
+
 
 class MyApp(wx.App):
     def __init__(self):
         super().__init__()
-        self.frame = MyFrame(parent=None, title='pyTorrent', size=(1100, 350))
-        self.frame.Show()
+        frame = MyFrame(parent=None, title='pyTorrent', size=(1100, 350))
+        frame.Show()
 
 s = lt.session()
-lock = threading.Lock()
 app = MyApp()
 app.MainLoop()
