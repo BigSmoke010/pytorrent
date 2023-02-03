@@ -136,45 +136,46 @@ class MyFrame(wx.Frame):
         self.ult.InsertColumnInfo(0, info)
         info = ULC.UltimateListItem()
         info._mask = wx.LIST_MASK_TEXT
-        info._text = "Progress"
-        self.ult.InsertColumnInfo(1, info)
-        info = ULC.UltimateListItem()
-        info._mask = wx.LIST_MASK_TEXT
-        info._text = "Status"
-        self.ult.InsertColumnInfo(2, info)
-        info = ULC.UltimateListItem()
-        info._mask = wx.LIST_MASK_TEXT
-        info._text = "Seeds"
-        self.ult.InsertColumnInfo(3, info)
-        info = ULC.UltimateListItem()
-        info._mask = wx.LIST_MASK_TEXT
-        info._text = "Peers"
-        self.ult.InsertColumnInfo(4, info)
-        info = ULC.UltimateListItem()
-        info._mask = wx.LIST_MASK_TEXT
-        info._text = "Download Speed"
-        self.ult.InsertColumnInfo(5, info)
-        info = ULC.UltimateListItem()
-        info._mask = wx.LIST_MASK_TEXT
-        info._text = "Upload Speed"
-        self.ult.InsertColumnInfo(6, info)
         info = ULC.UltimateListItem()
         info._mask = wx.LIST_MASK_TEXT
         info._text = "Total Download"
-        self.ult.InsertColumnInfo(7, info)
+        self.ult.InsertColumnInfo(1, info)
+        info._text = "Progress"
+        self.ult.InsertColumnInfo(2, info)
+        info = ULC.UltimateListItem()
+        info._mask = wx.LIST_MASK_TEXT
         info = ULC.UltimateListItem()
         info._mask = wx.LIST_MASK_TEXT
         info._text = "Total Downloaded"
+        self.ult.InsertColumnInfo(3, info)
+        info._mask = wx.LIST_MASK_TEXT
+        info._text = "Status"
+        self.ult.InsertColumnInfo(4, info)
+        info = ULC.UltimateListItem()
+        info._mask = wx.LIST_MASK_TEXT
+        info._text = "Seeds"
+        self.ult.InsertColumnInfo(5, info)
+        info = ULC.UltimateListItem()
+        info._mask = wx.LIST_MASK_TEXT
+        info._text = "Peers"
+        self.ult.InsertColumnInfo(6, info)
+        info = ULC.UltimateListItem()
+        info._mask = wx.LIST_MASK_TEXT
+        info._text = "Download Speed"
+        self.ult.InsertColumnInfo(7, info)
+        info = ULC.UltimateListItem()
+        info._mask = wx.LIST_MASK_TEXT
+        info._text = "Upload Speed"
         self.ult.InsertColumnInfo(8, info)
         self.ult.SetColumnWidth(0, 250)
-        self.ult.SetColumnWidth(1, 100)
+        self.ult.SetColumnWidth(7, 150)
         self.ult.SetColumnWidth(2, 150)
-        self.ult.SetColumnWidth(3, 50)
-        self.ult.SetColumnWidth(4, 50)
-        self.ult.SetColumnWidth(5, 120)
-        self.ult.SetColumnWidth(6, 120)
-        self.ult.SetColumnWidth(7, 120)
-        self.ult.SetColumnWidth(8, 150)
+        self.ult.SetColumnWidth(3, 150)
+        self.ult.SetColumnWidth(4, 100)
+        self.ult.SetColumnWidth(5, 80)
+        self.ult.SetColumnWidth(6, 80)
+        self.ult.SetColumnWidth(1, 100)
+        self.ult.SetColumnWidth(8, 100)
         self.cur.execute('SELECT oid,* FROM downloads')
         self.alldowns = self.cur.fetchall()
         self.cur.close()
@@ -257,14 +258,14 @@ class MyFrame(wx.Frame):
     def updateprog(self, message):
         for x,y in enumerate(self.alldowns):
             if y[1] == message.data[6]:
-                self.ult.SetStringItem(x, 1, str(message.data[0]))
-                self.ult.SetStringItem(x, 2, str(message.data[5]))
-                self.ult.SetStringItem(x, 3, str(message.data[1]))
-                self.ult.SetStringItem(x, 4, str(message.data[2]))
-                self.ult.SetStringItem(x, 5, str(round(message.data[3], 1)) + 'MB')
-                self.ult.SetStringItem(x, 6, str(message.data[4]) + 'MB')
-                self.ult.SetStringItem(x, 7, str(round(message.data[7], 2)) + 'MB')
-                self.ult.SetStringItem(x, 8, str(round(message.data[8], 2)) + 'MB')
+                self.ult.SetStringItem(x, 2, str(message.data[0]))
+                self.ult.SetStringItem(x, 4, str(message.data[5]))
+                self.ult.SetStringItem(x, 5, str(message.data[1]))
+                self.ult.SetStringItem(x, 6, str(message.data[2]))
+                self.ult.SetStringItem(x, 7, str(round(message.data[3], 1)) + 'MB')
+                self.ult.SetStringItem(x, 8, str(message.data[4]) + 'MB')
+                self.ult.SetStringItem(x, 1, str(round(message.data[7], 2)) + 'MB')
+                self.ult.SetStringItem(x, 3, str(round(message.data[8], 2)) + 'MB')
     def addtor(self,args):
         self.db =sqlite3.connect('downloads.db')
         self.cur = self.db.cursor()
