@@ -180,6 +180,8 @@ class MyFrame(wx.Frame):
         self.db.close()
         for i in self.alldowns:
             torthread(i, self)
+            print(i[0])
+            print(i[1])
             self.ult.InsertStringItem(i[0], i[1])
         self.boxsizer.Add(self.ult, 1, wx.EXPAND)
         self.panel.SetSizer(self.boxsizer)
@@ -232,7 +234,6 @@ class MyFrame(wx.Frame):
         self.alldowns = self.cur.fetchall()
         pub.sendMessage('deletetor', args=[self.alldowns[self.ind][1], self.alldowns[self.ind][4]])
         self.cur.execute('DELETE FROM downloads WHERE oid =' + str(self.ind + 1))
-        self.cur.execute('UPDATE downloads SET oid = oid - 1')
         self.cur.execute('SELECT oid,* FROM downloads')
         self.alldowns = self.cur.fetchall()
         self.ult.DeleteItem(self.ind)
@@ -281,7 +282,7 @@ class MyFrame(wx.Frame):
                 'torname': args[0],
                 'tordate': args[1],
                 'link': args[2],
-                'path': ls[0], 
+                'path': args[3] + ls[0], 
                 'ispaused': args[4]
             }
             )
