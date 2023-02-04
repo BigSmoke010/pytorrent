@@ -38,11 +38,12 @@ class torthread(threading.Thread):
         for i in self.alls:
             tmplist.append(i[0])
         if self.parseduri.name in tmplist:
-            try :
-                with open('resumedata/' + self.parseduri.name.replace("/", "."), 'rb') as self.r:
+            try:
+                with open('resumedata/' + self.parseduri.name, 'rb') as self.r:
                     self.rsumedata = lt.read_resume_data(self.r.read()) 
                     self.rsumedata.save_path = self._args[4] 
                     self.added = s.add_torrent(self.rsumedata)
+                    print('read')
             except FileNotFoundError:
                 self.added = s.add_torrent(self.parseduri)
         else:
@@ -56,6 +57,8 @@ class torthread(threading.Thread):
                 self.added.pause()
             if self.resumed and not self.paused:
                 self.added.resume()
+            with open ('resumedata/' + self.parseduri.name, 'wb') as f:
+                f.write(lt.write_resume_data_buf(lt.parse_magnet_uri(self._args[3])))
             wx.PostEvent(self._kwargs, ResultEvent([self.se.progress * 100 ,self.se.num_seeds, self.se.num_peers, self.se.download_rate / 1000000, self.se.upload_rate / 1000000, self.se.state,self.parseduri.name, self.se.total / 1000000, self.se.total_done / 1000000]))
             time.sleep(3)
 
@@ -178,11 +181,14 @@ class MyFrame(wx.Frame):
         self.alldowns = self.cur.fetchall()
         self.cur.close()
         self.db.close()
+        self.allgauges = []
         for i in self.alldowns:
-            torthread(i, self)
-            print(i[0])
-            print(i[1])
-            self.ult.InsertStringItem(i[0], i[1])
+            if i[-1] != 'yes':
+                self.allgauges.append((i[1],wx.Gauge(self.ult)))
+                torthread(i, self)
+                self.ult.InsertStringItem(i[0], i[1])
+
+        self.updategauges()
         self.boxsizer.Add(self.ult, 1, wx.EXPAND)
         self.panel.SetSizer(self.boxsizer)
         pub.subscribe(self.addtor, 'add')
@@ -191,6 +197,13 @@ class MyFrame(wx.Frame):
         self.showmenu()
         self.Bind(wx.EVT_MENU, self.magnet, self.frstentry)
         self.Bind(wx.EVT_LIST_ITEM_RIGHT_CLICK, self.OnRight)
+
+    def updategauges(self):
+            for x, gaug in enumerate(self.allgauges):
+                try:
+                    self.ult.SetItemWindow(x, 2,  gaug[1], expand=True)
+                except AttributeError:
+                    pass
 
     def EVT_RESULT(self, win, func):
         """Define Result Event."""
@@ -257,7 +270,9 @@ class MyFrame(wx.Frame):
     def updateprog(self, message):
         for x,y in enumerate(self.alldowns):
             if y[1] == message.data[6]:
-                self.ult.SetStringItem(x, 2, str(message.data[0]))
+                for name,gaug in self.allgauges:
+                    if name == message.data[6]:
+                        gaug.SetValue(int(message.data[0]))
                 self.ult.SetStringItem(x, 4, str(message.data[5]))
                 self.ult.SetStringItem(x, 5, str(message.data[1]))
                 self.ult.SetStringItem(x, 6, str(message.data[2]))
@@ -272,30 +287,31 @@ class MyFrame(wx.Frame):
         self.alldowns = self.cur.fetchall()
         tmplist = []
         ls = os.listdir(args[3])
-        for im in self.alldowns:
-            tmplist.append(im[0])
-        if args[0] in tmplist:
-            print('torrent already in')
-        else:
-            self.cur.execute('INSERT INTO downloads VALUES (:torname,:tordate,:link, :path, :ispaused)',
-            {
-                'torname': args[0],
-                'tordate': args[1],
-                'link': args[2],
-                'path': args[3] + ls[0], 
-                'ispaused': args[4]
-            }
-            )
-            try:
-                self.ult.InsertStringItem(self.alldowns[-1][0], args[0])
-            except IndexError:
-                self.ult.InsertStringItem(0, args[0])
+        if ls != []:
+            for im in self.alldowns:
+                tmplist.append(im[0])
+            if args[0] in tmplist:
+                print('torrent already in')
+            else:
+                self.cur.execute('INSERT INTO downloads VALUES (:torname,:tordate,:link, :path, :ispaused)',
+                {
+                    'torname': args[0],
+                    'tordate': args[1],
+                    'link': args[2],
+                    'path': args[3] + ls[0], 
+                    'ispaused': args[4]
+                }
+                )
+                try:
+                    self.ult.InsertStringItem(self.alldowns[-1][0], args[0])
+                except IndexError:
+                    self.ult.InsertStringItem(0, args[0])
 
-        self.db.commit()
-        self.cur.execute('SELECT oid,* FROM downloads')
-        self.alldowns = self.cur.fetchall()
-        self.cur.close()
-        self.db.close()
+            self.db.commit()
+            self.cur.execute('SELECT oid,* FROM downloads')
+            self.alldowns = self.cur.fetchall()
+            self.cur.close()
+            self.db.close()
     def addfrmdiag(self, x):
         torthread(x, self)
 
