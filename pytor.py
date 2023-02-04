@@ -57,19 +57,17 @@ class torthread(threading.Thread):
             if self.resumed and not self.paused:
                 self.added.resume()
             wx.PostEvent(self._kwargs, ResultEvent([self.se.progress * 100 ,self.se.num_seeds, self.se.num_peers, self.se.download_rate / 1000000, self.se.upload_rate / 1000000, self.se.state,self.parseduri.name, self.se.total / 1000000, self.se.total_done / 1000000]))
-            time.sleep(5)
-        self._stop_event.set()
+            time.sleep(3)
 
     def deletetorrent(self, args):
-        if self.parseduri.name == args:
+        if self.parseduri.name == args[0]:
             s.remove_torrent(self.added)
-            os.remove('resumedata/' + difflib.get_close_matches(self.parseduri.name, os.listdir('./resumedata/'))[0].replace("/","."))
+            # os.remove('resumedata/' + self.parseduri.name.replace("/","."))
             self.deleted = True
             try:
-                shutil.rmtree(self._args[4] + difflib.get_close_matches(self.parseduri.name, os.listdir('./downloads/'))[0])
+                shutil.rmtree(args[1])
             except NotADirectoryError:
-                os.remove(self._args[4] + difflib.get_close_matches(self.parseduri.name, os.listdir('./downloads/'))[0])
-            self._stop_event.set()
+                os.remove(args[1])
 
     def pausetorrent(self, args):
         if self.parseduri.name == args:
@@ -185,7 +183,6 @@ class MyFrame(wx.Frame):
             self.ult.InsertStringItem(i[0], i[1])
         self.boxsizer.Add(self.ult, 1, wx.EXPAND)
         self.panel.SetSizer(self.boxsizer)
-        pub.subscribe(self.updateprog, 'update')
         pub.subscribe(self.addtor, 'add')
         pub.subscribe(self.addfrmdiag, 'addfromdiag')
         self.EVT_RESULT(self, self.updateprog)
@@ -196,6 +193,7 @@ class MyFrame(wx.Frame):
     def EVT_RESULT(self, win, func):
         """Define Result Event."""
         win.Connect(-1, -1, -1, func)
+
     def OnRight(self, event):
         popupmenu = wx.Menu()
         PauseResume = popupmenu.Append(-1, "Pause/Resume")
@@ -232,7 +230,7 @@ class MyFrame(wx.Frame):
         self.cur = self.db.cursor()
         self.cur.execute('SELECT oid,* FROM downloads')
         self.alldowns = self.cur.fetchall()
-        pub.sendMessage('deletetor', args=self.alldowns[self.ind][1])
+        pub.sendMessage('deletetor', args=[self.alldowns[self.ind][1], self.alldowns[self.ind][4]])
         self.cur.execute('DELETE FROM downloads WHERE oid =' + str(self.ind + 1))
         self.cur.execute('UPDATE downloads SET oid = oid - 1')
         self.cur.execute('SELECT oid,* FROM downloads')
@@ -272,6 +270,7 @@ class MyFrame(wx.Frame):
         self.cur.execute('SELECT oid,* FROM downloads')
         self.alldowns = self.cur.fetchall()
         tmplist = []
+        ls = os.listdir(args[3])
         for im in self.alldowns:
             tmplist.append(im[0])
         if args[0] in tmplist:
@@ -282,7 +281,7 @@ class MyFrame(wx.Frame):
                 'torname': args[0],
                 'tordate': args[1],
                 'link': args[2],
-                'path': args[3],
+                'path': ls[0], 
                 'ispaused': args[4]
             }
             )
