@@ -142,7 +142,7 @@ class MyFrame(wx.Frame):
             info._text = i
             self.ult.InsertColumnInfo(index, info)
 
-        for index, i in enumerate([250, 150, 150,150,100, 80,80,100,100]):
+        for index, i in enumerate([250, 110, 150,110,100, 80,80,100,100]):
             self.ult.SetColumnWidth(index, i)
         self.cur.execute('SELECT oid,* FROM downloads')
         self.alldowns = self.cur.fetchall()
@@ -237,8 +237,13 @@ class MyFrame(wx.Frame):
         dilaog.Destroy()
 
     def updateprog(self, message):
+        self.db =sqlite3.connect('downloads.db')
+        self.cur = self.db.cursor()
+        self.cur.execute('SELECT oid,* FROM downloads')
+        self.alldowns = self.cur.fetchall()
         for x,y in enumerate(self.alldowns):
             if y[1] == message.data[6]:
+                print(y)
                 for name,gaug in self.allgauges:
                     if name == message.data[6]:
                         gaug.SetValue(int(message.data[0]))
