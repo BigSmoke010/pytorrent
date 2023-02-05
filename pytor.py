@@ -33,7 +33,12 @@ class torthread(threading.Thread):
         self.curs.close()
         self.db.close()
         tmplist = []
-        self.parseduri = lt.parse_magnet_uri(self._args[3])
+        try: 
+            self.parseduri = lt.parse_magnet_uri(self._args[3])
+        except Exception as e:
+            print(e)
+            pub.sendMessage('error', msg=e)
+
         self.parseduri.save_path = self._args[4]
         for i in self.alls:
             tmplist.append(i[0])
@@ -65,7 +70,7 @@ class torthread(threading.Thread):
     def deletetorrent(self, args):
         if self.parseduri.name == args[0]:
             s.remove_torrent(self.added)
-            # os.remove('resumedata/' + self.parseduri.name.replace("/","."))
+            os.remove('resumedata/' + self.parseduri.name)
             self.deleted = True
             try:
                 shutil.rmtree(args[1])
@@ -131,52 +136,14 @@ class MyFrame(wx.Frame):
         self.boxsizer = wx.BoxSizer(wx.VERTICAL)
         self.indeex = 0
         self.ult = ULC.UltimateListCtrl(self.panel, agwStyle= ULC.ULC_REPORT | ULC.ULC_HAS_VARIABLE_ROW_HEIGHT)
-        info = ULC.UltimateListItem()
-        info._mask = wx.LIST_MASK_TEXT
-        info._text = "Name"
-        self.ult.InsertColumnInfo(0, info)
-        info = ULC.UltimateListItem()
-        info._mask = wx.LIST_MASK_TEXT
-        info = ULC.UltimateListItem()
-        info._mask = wx.LIST_MASK_TEXT
-        info._text = "Total Download"
-        self.ult.InsertColumnInfo(1, info)
-        info._text = "Progress"
-        self.ult.InsertColumnInfo(2, info)
-        info = ULC.UltimateListItem()
-        info._mask = wx.LIST_MASK_TEXT
-        info = ULC.UltimateListItem()
-        info._mask = wx.LIST_MASK_TEXT
-        info._text = "Total Downloaded"
-        self.ult.InsertColumnInfo(3, info)
-        info._mask = wx.LIST_MASK_TEXT
-        info._text = "Status"
-        self.ult.InsertColumnInfo(4, info)
-        info = ULC.UltimateListItem()
-        info._mask = wx.LIST_MASK_TEXT
-        info._text = "Seeds"
-        self.ult.InsertColumnInfo(5, info)
-        info = ULC.UltimateListItem()
-        info._mask = wx.LIST_MASK_TEXT
-        info._text = "Peers"
-        self.ult.InsertColumnInfo(6, info)
-        info = ULC.UltimateListItem()
-        info._mask = wx.LIST_MASK_TEXT
-        info._text = "Download Speed"
-        self.ult.InsertColumnInfo(7, info)
-        info = ULC.UltimateListItem()
-        info._mask = wx.LIST_MASK_TEXT
-        info._text = "Upload Speed"
-        self.ult.InsertColumnInfo(8, info)
-        self.ult.SetColumnWidth(0, 250)
-        self.ult.SetColumnWidth(7, 150)
-        self.ult.SetColumnWidth(2, 150)
-        self.ult.SetColumnWidth(3, 150)
-        self.ult.SetColumnWidth(4, 100)
-        self.ult.SetColumnWidth(5, 80)
-        self.ult.SetColumnWidth(6, 80)
-        self.ult.SetColumnWidth(1, 100)
-        self.ult.SetColumnWidth(8, 100)
+        for index, i in enumerate(['Name', 'Size', 'Progress', 'Downloaded', 'Status', 'Down Speed', 'Up Speed','Seeds', 'Peers']):
+            info = ULC.UltimateListItem()
+            info._mask = wx.LIST_MASK_TEXT
+            info._text = i
+            self.ult.InsertColumnInfo(index, info)
+
+        for index, i in enumerate([250, 150, 150,150,100, 80,80,100,100]):
+            self.ult.SetColumnWidth(index, i)
         self.cur.execute('SELECT oid,* FROM downloads')
         self.alldowns = self.cur.fetchall()
         self.cur.close()
@@ -188,18 +155,19 @@ class MyFrame(wx.Frame):
                 torthread(i, self)
                 self.ult.InsertStringItem(i[0], i[1])
 
-        self.updategauges()
+        self.updategauges(self.allgauges)
         self.boxsizer.Add(self.ult, 1, wx.EXPAND)
         self.panel.SetSizer(self.boxsizer)
         pub.subscribe(self.addtor, 'add')
         pub.subscribe(self.addfrmdiag, 'addfromdiag')
+        pub.subscribe(self.raiseerror, 'error')
         self.EVT_RESULT(self, self.updateprog)
         self.showmenu()
         self.Bind(wx.EVT_MENU, self.magnet, self.frstentry)
         self.Bind(wx.EVT_LIST_ITEM_RIGHT_CLICK, self.OnRight)
 
-    def updategauges(self):
-            for x, gaug in enumerate(self.allgauges):
+    def updategauges(self, gauges):
+            for x, gaug in enumerate(gauges):
                 try:
                     self.ult.SetItemWindow(x, 2,  gaug[1], expand=True)
                 except AttributeError:
@@ -249,6 +217,7 @@ class MyFrame(wx.Frame):
         self.cur.execute('DELETE FROM downloads WHERE oid =' + str(self.ind + 1))
         self.cur.execute('SELECT oid,* FROM downloads')
         self.alldowns = self.cur.fetchall()
+        del self.allgauges[self.ind]
         self.ult.DeleteItem(self.ind)
         self.db.commit()
         self.cur.close()
@@ -274,10 +243,10 @@ class MyFrame(wx.Frame):
                     if name == message.data[6]:
                         gaug.SetValue(int(message.data[0]))
                 self.ult.SetStringItem(x, 4, str(message.data[5]))
-                self.ult.SetStringItem(x, 5, str(message.data[1]))
-                self.ult.SetStringItem(x, 6, str(message.data[2]))
-                self.ult.SetStringItem(x, 7, str(round(message.data[3], 1)) + 'MB')
-                self.ult.SetStringItem(x, 8, str(message.data[4]) + 'MB')
+                self.ult.SetStringItem(x, 7, str(message.data[1]))
+                self.ult.SetStringItem(x, 8, str(message.data[2]))
+                self.ult.SetStringItem(x, 5, str(round(message.data[3], 1)) + 'MB')
+                self.ult.SetStringItem(x, 6, str(message.data[4]) + 'MB')
                 self.ult.SetStringItem(x, 1, str(round(message.data[7], 2)) + 'MB')
                 self.ult.SetStringItem(x, 3, str(round(message.data[8], 2)) + 'MB')
     def addtor(self,args):
@@ -287,33 +256,40 @@ class MyFrame(wx.Frame):
         self.alldowns = self.cur.fetchall()
         tmplist = []
         ls = os.listdir(args[3])
-        if ls != []:
-            for im in self.alldowns:
-                tmplist.append(im[0])
-            if args[0] in tmplist:
-                print('torrent already in')
-            else:
-                self.cur.execute('INSERT INTO downloads VALUES (:torname,:tordate,:link, :path, :ispaused)',
-                {
-                    'torname': args[0],
-                    'tordate': args[1],
-                    'link': args[2],
-                    'path': args[3] + ls[0], 
-                    'ispaused': args[4]
-                }
-                )
-                try:
-                    self.ult.InsertStringItem(self.alldowns[-1][0], args[0])
-                except IndexError:
-                    self.ult.InsertStringItem(0, args[0])
+        while ls == []:
+            ls = os.listdir(args[3])
+            time.sleep(3)
+        for im in self.alldowns:
+            tmplist.append(im[0])
+        if args[0] in tmplist:
+            print('torrent already in')
+        else:
+            self.cur.execute('INSERT INTO downloads VALUES (:torname,:tordate,:link, :path, :ispaused)',
+            {
+                'torname': args[0],
+                'tordate': args[1],
+                'link': args[2],
+                'path': args[3] + ls[0], 
+                'ispaused': args[4]
+            }
+            )
+            try:
+                self.ult.InsertStringItem(self.alldowns[-1][0], args[0])
+            except IndexError:
+                self.ult.InsertStringItem(0, args[0])
 
+            self.allgauges.append((args[0], wx.Gauge(self.ult)))
+            self.updategauges(self.allgauges)
             self.db.commit()
-            self.cur.execute('SELECT oid,* FROM downloads')
-            self.alldowns = self.cur.fetchall()
             self.cur.close()
             self.db.close()
+
     def addfrmdiag(self, x):
         torthread(x, self)
+
+    def raiseerror(self, msg):
+        dig = wx.MessageDialog(None, str(msg), 'Error', wx.ICON_ERROR )
+        dig.ShowModal()
 
 
 class MyApp(wx.App):
