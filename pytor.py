@@ -22,6 +22,10 @@ class torthread(threading.Thread):
         self.curs.execute('SELECT * FROM downloads')
         self.paused = False
         self.resumed = True
+        self.unit = 'MB'
+        self.doneunit = 'MB'
+        self.total = 0
+        self.total_done = 0
         self.deleted = False
         try:
             if self._args[5] == 'yes':
@@ -36,7 +40,6 @@ class torthread(threading.Thread):
         try: 
             self.parseduri = lt.parse_magnet_uri(self._args[3])
         except Exception as e:
-            print(e)
             pub.sendMessage('error', msg=e)
 
         self.parseduri.save_path = self._args[4]
@@ -48,7 +51,6 @@ class torthread(threading.Thread):
                     self.rsumedata = lt.read_resume_data(self.r.read()) 
                     self.rsumedata.save_path = self._args[4] 
                     self.added = s.add_torrent(self.rsumedata)
-                    print('read')
             except FileNotFoundError:
                 self.added = s.add_torrent(self.parseduri)
         else:
@@ -64,7 +66,19 @@ class torthread(threading.Thread):
                 self.added.resume()
             with open ('resumedata/' + self.parseduri.name, 'wb') as f:
                 f.write(lt.write_resume_data_buf(lt.parse_magnet_uri(self._args[3])))
-            wx.PostEvent(self._kwargs, ResultEvent([self.se.progress * 100 ,self.se.num_seeds, self.se.num_peers, self.se.download_rate / 1000000, self.se.upload_rate / 1000000, self.se.state,self.parseduri.name, self.se.total / 1000000, self.se.total_done / 1000000]))
+            if self.se.total >= 1000000000:
+                self.total= self.se.total / 1000000000
+                self.unit = 'GB'
+            else:
+                self.total = self.se.total / 1000000 
+                self.unit = 'MB'
+            if self.se.total_done >= 1000000000:
+                self.total_done= self.se.total_done / 1000000000
+                self.doneunit = 'GB'
+            else:
+                self.total_done = self.se.total_done / 1000000 
+                self.doneunit = 'MB'
+            wx.PostEvent(self._kwargs, ResultEvent([self.se.progress * 100 ,self.se.num_seeds, self.se.num_peers, self.se.download_rate / 1000000, self.se.upload_rate / 1000000, self.se.state,self.parseduri.name, self.total , self.total_done, self.unit, self.doneunit]))
             time.sleep(3)
 
     def deletetorrent(self, args):
@@ -232,7 +246,7 @@ class MyFrame(wx.Frame):
         self.SetMenuBar(self.mainmenu)
 
     def magnet(self, event):
-        dilaog = magntdialog(None, title='Add magnet', size=(560,130))
+        dilaog = magntdialog(None, title='Add magnet', size=(660,230))
         dilaog.ShowModal()
         dilaog.Destroy()
 
@@ -243,17 +257,16 @@ class MyFrame(wx.Frame):
         self.alldowns = self.cur.fetchall()
         for x,y in enumerate(self.alldowns):
             if y[1] == message.data[6]:
-                print(y)
                 for name,gaug in self.allgauges:
                     if name == message.data[6]:
                         gaug.SetValue(int(message.data[0]))
                 self.ult.SetStringItem(x, 4, str(message.data[5]))
                 self.ult.SetStringItem(x, 7, str(message.data[1]))
                 self.ult.SetStringItem(x, 8, str(message.data[2]))
-                self.ult.SetStringItem(x, 5, str(round(message.data[3], 1)) + 'MB')
-                self.ult.SetStringItem(x, 6, str(message.data[4]) + 'MB')
-                self.ult.SetStringItem(x, 1, str(round(message.data[7], 2)) + 'MB')
-                self.ult.SetStringItem(x, 3, str(round(message.data[8], 2)) + 'MB')
+                self.ult.SetStringItem(x, 5, str(round(message.data[3], 1)))
+                self.ult.SetStringItem(x, 6, str(round(message.data[4], 1)))
+                self.ult.SetStringItem(x, 1, str(round(message.data[7], 2))+ message.data[9])
+                self.ult.SetStringItem(x, 3, str(round(message.data[8], 2))+ message.data[10])
     def addtor(self,args):
         self.db =sqlite3.connect('downloads.db')
         self.cur = self.db.cursor()
@@ -266,9 +279,7 @@ class MyFrame(wx.Frame):
             time.sleep(3)
         for im in self.alldowns:
             tmplist.append(im[0])
-        if args[0] in tmplist:
-            print('torrent already in')
-        else:
+        if args[0] not in tmplist:
             self.cur.execute('INSERT INTO downloads VALUES (:torname,:tordate,:link, :path, :ispaused)',
             {
                 'torname': args[0],
