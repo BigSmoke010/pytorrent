@@ -1,3 +1,4 @@
 downloads.db
 downloads/*
 resumedata/*
+__pycache__

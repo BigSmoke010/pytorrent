@@ -10,7 +10,6 @@ import os
 import shutil
 import difflib
 
-
 class torthread(threading.Thread):
 
     def __init__(self, args, win):
@@ -129,7 +128,7 @@ class magntdialog(wx.Dialog):
         self.panel = wx.Panel(self)
         gridsizr = wx.GridSizer(1, 2, 1, 1)
         stbx = wx.StaticBox(self.panel, -1, 'Submit Magnet Link')
-        sttcbx = wx.StaticBoxSizer(stbx, wx.VERTICAL)
+        sttcbx = wx.StaticBoxSizer(stbx)
         self.entry = wx.TextCtrl(self.panel, size=(250, 30))
         self.entry2 = wx.TextCtrl(self.panel,
                                   size=(200, 30),
@@ -308,8 +307,8 @@ class MyFrame(wx.Frame):
                 self.ult.SetStringItem(x, 4, str(message.data[5]))
                 self.ult.SetStringItem(x, 7, str(message.data[1]))
                 self.ult.SetStringItem(x, 8, str(message.data[2]))
-                self.ult.SetStringItem(x, 5, str(round(message.data[3], 1)))
-                self.ult.SetStringItem(x, 6, str(round(message.data[4], 1)))
+                self.ult.SetStringItem(x, 5, str(round(message.data[3], 1)) + 'MB')
+                self.ult.SetStringItem(x, 6, str(round(message.data[4], 1)) + 'MB')
                 self.ult.SetStringItem(
                     x, 1,
                     str(round(message.data[7], 2)) + message.data[9])
@@ -359,13 +358,9 @@ class MyFrame(wx.Frame):
 
 
 class MyApp(wx.App):
-
     def __init__(self):
         super().__init__()
         frame = MyFrame(parent=None, title='pyTorrent', size=(1100, 350))
         frame.Show()
 
-
 s = lt.session()
-app = MyApp()
-app.MainLoop()
